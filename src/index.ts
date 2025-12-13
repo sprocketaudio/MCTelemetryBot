@@ -13,16 +13,20 @@ if (!token || !clientId || !guildId) {
   throw new Error('DISCORD_TOKEN, DISCORD_CLIENT_ID, and DISCORD_GUILD_ID must be set.');
 }
 
+const resolvedToken = token!;
+const resolvedClientId = clientId!;
+const resolvedGuildId = guildId!;
+
 const servers = loadServers();
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
-const rest = new REST({ version: '10' }).setToken(token);
+const rest = new REST({ version: '10' }).setToken(resolvedToken);
 
 async function registerCommands() {
   const commands = [mcStatusCommand.toJSON()];
   logger.info('Registering slash commands');
-  await rest.put(Routes.applicationGuildCommands(clientId, guildId), { body: commands });
+  await rest.put(Routes.applicationGuildCommands(resolvedClientId, resolvedGuildId), { body: commands });
   logger.info('Commands registered');
 }
 
@@ -57,7 +61,7 @@ client.on('interactionCreate', async (interaction: Interaction) => {
 async function start() {
   try {
     await registerCommands();
-    await client.login(token);
+    await client.login(resolvedToken);
   } catch (error) {
     logger.error('Failed to start bot', error);
     process.exit(1);
