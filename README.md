@@ -25,17 +25,18 @@ A Discord bot for monitoring Minecraft servers via MCTelemetry endpoints and Pte
    ```json
    [
      {
-       "id": "aof",
-       "name": "Age Of Fate",
-       "telemetryUrl": "http://188.40.107.48:28765/telemetry",
-       "pteroIdentifier": "17cb1533",
-       "pteroName": "AOF Node"
+       "id": "server_id",
+       "name": "Server Name",
+       "telemetryUrl": "http://<servername>:<IP>/telemetry",
+       "pteroIdentifier": "ptero_id",
+       "pteroName": "Ptero Name"
      },
      {
-       "id": "atm10",
-       "name": "ATM10",
-       "telemetryUrl": "http://188.40.107.48:28766/telemetry",
-       "pteroIdentifier": "55aabb22"
+       "id": "server_id",
+       "name": "Server Name",
+       "telemetryUrl": "http://<servername>:<IP>/telemetry",
+       "pteroIdentifier": "ptero_id",
+       "pteroName": "Ptero Name"
      }
    ]
    ```
