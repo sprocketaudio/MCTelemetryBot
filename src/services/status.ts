@@ -207,20 +207,24 @@ export const buildStatusEmbed = (
   return embed;
 };
 
-export const buildViewComponents = (activeView: StatusView) => [
-  new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder()
-      .setCustomId(MCSTATUS_VIEW_STATUS_ID)
-      .setLabel('Status')
-      .setStyle(ButtonStyle.Primary)
-      .setDisabled(activeView === 'status'),
-    new ButtonBuilder()
-      .setCustomId(MCSTATUS_VIEW_PLAYERS_ID)
-      .setLabel('Players')
-      .setStyle(ButtonStyle.Primary)
-      .setDisabled(activeView === 'players')
-  ),
-];
+export function buildViewComponents(
+  activeView: StatusView
+): ActionRowBuilder<ButtonBuilder>[] {
+  return [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(MCSTATUS_VIEW_STATUS_ID)
+        .setLabel('Status')
+        .setStyle(ButtonStyle.Primary)
+        .setDisabled(activeView === 'status'),
+      new ButtonBuilder()
+        .setCustomId(MCSTATUS_VIEW_PLAYERS_ID)
+        .setLabel('Players')
+        .setStyle(ButtonStyle.Primary)
+        .setDisabled(activeView === 'players')
+    ),
+  ];
+}
 
 export const getViewFromMessage = (message: Message): StatusView => {
   for (const row of message.components) {
