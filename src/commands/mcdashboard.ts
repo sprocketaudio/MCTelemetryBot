@@ -9,7 +9,7 @@ import {
   GuildTextBasedChannel,
 } from 'discord.js';
 import { DashboardConfig, loadDashboardConfig, saveDashboardConfig } from '../services/dashboardStore';
-import { buildDefaultViews, buildStatusEmbeds, buildViewComponents, fetchServerStatuses } from '../services/status';
+import { buildDefaultState, buildStatusEmbeds, buildViewComponents, fetchServerStatuses } from '../services/status';
 import { isAdmin } from '../utils/permissions';
 import { logger } from '../utils/logger';
 import { ServerConfig } from '../config/servers';
@@ -66,9 +66,9 @@ export async function executeMcDashboard(
   await interaction.deferReply({ ephemeral: true });
 
   const statuses = await fetchServerStatuses(context.servers, { forceRefresh: true });
-  const views = buildDefaultViews(context.servers);
-  const embeds = buildStatusEmbeds(context.servers, statuses, new Date(), views);
-  const components = buildViewComponents(context.servers, views);
+  const state = buildDefaultState();
+  const embeds = buildStatusEmbeds(context.servers, statuses, new Date(), state.view, state.selectedServerId);
+  const components = buildViewComponents(context.servers, state.view, state.selectedServerId);
 
   const existingConfig = loadDashboardConfig();
   let targetMessage: Message<true> | null = null;

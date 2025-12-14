@@ -1,19 +1,28 @@
-import { ButtonInteraction, ChatInputCommandInteraction, PermissionFlagsBits, SlashCommandBuilder } from 'discord.js';
+import {
+  ButtonInteraction,
+  ChatInputCommandInteraction,
+  PermissionFlagsBits,
+  SlashCommandBuilder,
+  StringSelectMenuInteraction,
+} from 'discord.js';
 import { ServerConfig } from '../config/servers';
 import {
+  DashboardState,
   StatusView,
-  buildDefaultViews,
+  buildDefaultState,
   buildStatusEmbeds,
   buildViewComponents,
   fetchServerStatuses,
-  getViewsFromMessage,
+  getDashboardStateFromMessage,
 } from '../services/status';
+import { MCSTATUS_ACTION_CUSTOM_ID_PREFIX } from '../config/constants';
 import { isAdmin } from '../utils/permissions';
 
 export interface CommandContext {
   servers: ServerConfig[];
   adminRoleId?: string;
-  onViewChange?: (views: Map<string, StatusView>, messageId?: string) => void;
+  onStateChange?: (state: DashboardState, messageId?: string) => void;
+  getState?: (messageId: string) => DashboardState | null;
 }
 
 export const mcStatusCommand = new SlashCommandBuilder()
@@ -36,16 +45,28 @@ export async function executeMcStatus(
   await interaction.deferReply();
 
   const statuses = await fetchServerStatuses(context.servers);
-  const views = buildDefaultViews(context.servers);
-  const embeds = buildStatusEmbeds(context.servers, statuses, new Date(), views);
+  const state = buildDefaultState();
+  const embeds = buildStatusEmbeds(context.servers, statuses, new Date(), state.view, state.selectedServerId);
 
-  await interaction.editReply({ embeds, components: buildViewComponents(context.servers, views) });
+  const message = await interaction.editReply({
+    embeds,
+    components: buildViewComponents(context.servers, state.view, state.selectedServerId),
+  });
+
+  if (context.onStateChange) {
+    context.onStateChange(state, message.id);
+  }
 }
+
+const resolveState = (interaction: ButtonInteraction | StringSelectMenuInteraction, context: CommandContext) => {
+  const messageId = interaction.message.id;
+  return context.getState?.(messageId) ?? getDashboardStateFromMessage(interaction.message, context.servers);
+};
 
 export async function handleMcStatusView(
   interaction: ButtonInteraction,
   context: CommandContext,
-  request: { serverId: string; view: StatusView }
+  view: StatusView
 ): Promise<void> {
   if (!isAdmin(interaction, context.adminRoleId)) {
     await interaction.reply({
@@ -57,15 +78,103 @@ export async function handleMcStatusView(
 
   await interaction.deferUpdate();
 
-  const currentViews = getViewsFromMessage(interaction.message, context.servers);
-  currentViews.set(request.serverId, request.view);
+  const currentState = resolveState(interaction, context);
+  currentState.view = view;
 
-  if (context.onViewChange) {
-    context.onViewChange(currentViews, interaction.message.id);
+  if (context.onStateChange) {
+    context.onStateChange(currentState, interaction.message.id);
   }
 
   const statuses = await fetchServerStatuses(context.servers, { forceRefresh: true });
-  const embeds = buildStatusEmbeds(context.servers, statuses, new Date(), currentViews);
+  const embeds = buildStatusEmbeds(
+    context.servers,
+    statuses,
+    new Date(),
+    currentState.view,
+    currentState.selectedServerId
+  );
 
-  await interaction.editReply({ embeds, components: buildViewComponents(context.servers, currentViews) });
+  await interaction.editReply({
+    embeds,
+    components: buildViewComponents(context.servers, currentState.view, currentState.selectedServerId),
+  });
+}
+
+export async function handleMcStatusSelect(
+  interaction: StringSelectMenuInteraction,
+  context: CommandContext
+): Promise<void> {
+  if (!isAdmin(interaction, context.adminRoleId)) {
+    await interaction.reply({
+      content: 'You need Administrator permissions to refresh this status.',
+      ephemeral: true,
+    });
+    return;
+  }
+
+  await interaction.deferUpdate();
+
+  const selectedId = interaction.values?.[0];
+  const selectedServer = context.servers.find((server) => server.id === selectedId) ?? null;
+  const currentState = resolveState(interaction, context);
+  currentState.selectedServerId = selectedServer ? selectedServer.id : null;
+
+  if (context.onStateChange) {
+    context.onStateChange(currentState, interaction.message.id);
+  }
+
+  const statuses = await fetchServerStatuses(context.servers, { forceRefresh: true });
+  const embeds = buildStatusEmbeds(
+    context.servers,
+    statuses,
+    new Date(),
+    currentState.view,
+    currentState.selectedServerId
+  );
+
+  await interaction.editReply({
+    embeds,
+    components: buildViewComponents(context.servers, currentState.view, currentState.selectedServerId),
+  });
+}
+
+export type StatusAction = 'console' | 'restart' | 'stop' | 'start';
+
+export const parseActionButton = (customId: string): StatusAction | null => {
+  const match = customId.match(
+    new RegExp(`^${MCSTATUS_ACTION_CUSTOM_ID_PREFIX}:(console|restart|stop|start)$`)
+  );
+  if (!match) return null;
+  return match[1] as StatusAction;
+};
+
+export async function handleMcStatusAction(
+  interaction: ButtonInteraction,
+  context: CommandContext,
+  action: StatusAction
+): Promise<void> {
+  if (!isAdmin(interaction, context.adminRoleId)) {
+    await interaction.reply({
+      content: 'You need Administrator permissions to perform this action.',
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const currentState = resolveState(interaction, context);
+  if (!currentState.selectedServerId) {
+    await interaction.reply({ content: 'Select a server first.', ephemeral: true });
+    return;
+  }
+
+  const targetServer = context.servers.find((server) => server.id === currentState.selectedServerId);
+  if (!targetServer) {
+    await interaction.reply({ content: 'Selected server is no longer available.', ephemeral: true });
+    return;
+  }
+
+  await interaction.reply({
+    content: `Action "${action}" for **${targetServer.name}** is not implemented yet.`,
+    ephemeral: true,
+  });
 }

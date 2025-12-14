@@ -1,6 +1,20 @@
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, Message } from 'discord.js';
+import {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  ComponentType,
+  EmbedBuilder,
+  Message,
+  MessageActionRowComponentBuilder,
+  StringSelectMenuBuilder,
+  StringSelectMenuOptionBuilder,
+} from 'discord.js';
 import { ServerConfig } from '../config/servers';
-import { MCSTATUS_VIEW_CUSTOM_ID_PREFIX } from '../config/constants';
+import {
+  MCSTATUS_ACTION_CUSTOM_ID_PREFIX,
+  MCSTATUS_SELECT_CUSTOM_ID,
+  MCSTATUS_VIEW_CUSTOM_ID_PREFIX,
+} from '../config/constants';
 import { PterodactylResources, fetchPterodactylResources } from './pterodactyl';
 import { TelemetryResponse, fetchTelemetry } from './telemetry';
 import { logger } from '../utils/logger';
@@ -14,22 +28,22 @@ export interface ServerStatus {
 
 export type StatusView = 'status' | 'players';
 
-export type ServerViews = Map<string, StatusView>;
+export interface DashboardState {
+  selectedServerId: string | null;
+  view: StatusView;
+}
 
-const VIEW_CUSTOM_ID_REGEX = new RegExp(
-  `^${MCSTATUS_VIEW_CUSTOM_ID_PREFIX}:([^:]+):(status|players)$`
-);
+const VIEW_CUSTOM_ID_REGEX = new RegExp(`^${MCSTATUS_VIEW_CUSTOM_ID_PREFIX}:(status|players)$`);
 
-export const buildDefaultViews = (servers: ServerConfig[], defaultView: StatusView = 'status') => {
-  const views: ServerViews = new Map();
-  servers.forEach((server) => views.set(server.id, defaultView));
-  return views;
-};
+export const buildDefaultState = (defaultView: StatusView = 'status'): DashboardState => ({
+  selectedServerId: null,
+  view: defaultView,
+});
 
-export const parseViewButton = (customId: string): { serverId: string; view: StatusView } | null => {
+export const parseViewButton = (customId: string): StatusView | null => {
   const match = customId.match(VIEW_CUSTOM_ID_REGEX);
   if (!match) return null;
-  return { serverId: match[1], view: match[2] as StatusView };
+  return match[1] as StatusView;
 };
 
 export async function fetchServerStatuses(
@@ -197,24 +211,27 @@ export const buildStatusEmbeds = (
   servers: ServerConfig[],
   statuses: Map<string, ServerStatus>,
   lastUpdated: Date,
-  views: ServerViews
+  view: StatusView,
+  selectedServerId: string | null
 ) => {
   const leftWidth = 16;
   const embeds: EmbedBuilder[] = [];
+
+  const selectedId = servers.some((server) => server.id === selectedServerId) ? selectedServerId : null;
 
   servers.forEach((server) => {
     const status = statuses.get(server.id);
     const telemetry = status?.telemetry;
     const pterodactyl = status?.pterodactyl;
 
-    const activeView = views.get(server.id) ?? 'status';
     const description =
-      activeView === 'status'
+      view === 'status'
         ? formatStatusLines(telemetry, pterodactyl, status?.telemetryError, leftWidth)
         : formatPlayerLines(telemetry, status?.telemetryError);
 
     const name = server.pteroName ?? server.name;
-    const title = `${name}  ${formatStatus(pterodactyl?.currentState)}`;
+    const prefix = server.id === selectedId ? '▶ ' : '';
+    const title = `${prefix}${name}  ${formatStatus(pterodactyl?.currentState)}`;
 
     embeds.push(
       new EmbedBuilder()
@@ -230,40 +247,98 @@ export const buildStatusEmbeds = (
 
 export function buildViewComponents(
   servers: ServerConfig[],
-  views: ServerViews
-): ActionRowBuilder<ButtonBuilder>[] {
-  return servers.map((server) => {
-    const activeView = views.get(server.id) ?? 'status';
-    return new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
-        .setCustomId(`${MCSTATUS_VIEW_CUSTOM_ID_PREFIX}:${server.id}:status`)
-        .setLabel('Status')
-        .setStyle(ButtonStyle.Primary)
-        .setDisabled(activeView === 'status'),
-      new ButtonBuilder()
-        .setCustomId(`${MCSTATUS_VIEW_CUSTOM_ID_PREFIX}:${server.id}:players`)
-        .setLabel('Players')
-        .setStyle(ButtonStyle.Primary)
-        .setDisabled(activeView === 'players')
-    );
-  });
+  view: StatusView,
+  selectedServerId: string | null
+): ActionRowBuilder<MessageActionRowComponentBuilder>[] {
+  const selectedId = servers.some((server) => server.id === selectedServerId) ? selectedServerId : null;
+
+  const selectMenu = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId(MCSTATUS_SELECT_CUSTOM_ID)
+      .setPlaceholder('Select server…')
+      .addOptions(
+        servers.map((server) =>
+          new StringSelectMenuOptionBuilder()
+            .setLabel(server.name)
+            .setValue(server.id)
+            .setDefault(server.id === selectedId)
+        )
+      )
+  );
+
+  const viewButtons = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`${MCSTATUS_VIEW_CUSTOM_ID_PREFIX}:status`)
+      .setLabel('Status')
+      .setStyle(ButtonStyle.Primary)
+      .setDisabled(view === 'status'),
+    new ButtonBuilder()
+      .setCustomId(`${MCSTATUS_VIEW_CUSTOM_ID_PREFIX}:players`)
+      .setLabel('Players')
+      .setStyle(ButtonStyle.Primary)
+      .setDisabled(view === 'players')
+  );
+
+  const actionButtons = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`${MCSTATUS_ACTION_CUSTOM_ID_PREFIX}:console`)
+      .setLabel('Open Console')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(!selectedId),
+    new ButtonBuilder()
+      .setCustomId(`${MCSTATUS_ACTION_CUSTOM_ID_PREFIX}:restart`)
+      .setLabel('Restart')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(!selectedId),
+    new ButtonBuilder()
+      .setCustomId(`${MCSTATUS_ACTION_CUSTOM_ID_PREFIX}:stop`)
+      .setLabel('Stop')
+      .setStyle(ButtonStyle.Danger)
+      .setDisabled(!selectedId),
+    new ButtonBuilder()
+      .setCustomId(`${MCSTATUS_ACTION_CUSTOM_ID_PREFIX}:start`)
+      .setLabel('Start')
+      .setStyle(ButtonStyle.Success)
+      .setDisabled(!selectedId)
+  );
+
+  return [selectMenu, viewButtons, actionButtons];
 }
 
-export const getViewsFromMessage = (message: Message, servers: ServerConfig[]): ServerViews => {
-  const views = buildDefaultViews(servers);
+export const getDashboardStateFromMessage = (
+  message: Message,
+  servers: ServerConfig[]
+): DashboardState => {
+  const state = buildDefaultState();
+  const validIds = new Set(servers.map((server) => server.id));
 
   for (const row of message.components) {
-    const actionRow = (row as { components?: { customId?: string; disabled?: boolean }[] }).components;
+    const actionRow = (row as { components?: { customId?: string; disabled?: boolean; options?: { value: string; default?: boolean }[]; type?: number }[] }).components;
     if (!actionRow) continue;
 
     for (const component of actionRow) {
-      if (!component.customId || !component.disabled) continue;
-      const parsed = parseViewButton(component.customId);
-      if (parsed) {
-        views.set(parsed.serverId, parsed.view);
+      if (!component.customId) continue;
+
+      if (component.customId === MCSTATUS_SELECT_CUSTOM_ID && component.type === ComponentType.StringSelect) {
+        const selectedOption = component.options?.find((option) => option.default);
+        if (selectedOption && validIds.has(selectedOption.value)) {
+          state.selectedServerId = selectedOption.value;
+        }
+      }
+
+      const parsedView = parseViewButton(component.customId);
+      if (parsedView) {
+        const isDisabled = (component as { disabled?: boolean }).disabled;
+        if (isDisabled || !state.view) {
+          state.view = parsedView;
+        }
       }
     }
   }
 
-  return views;
+  if (state.selectedServerId && !validIds.has(state.selectedServerId)) {
+    state.selectedServerId = null;
+  }
+
+  return state;
 };
