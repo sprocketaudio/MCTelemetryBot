@@ -31,7 +31,7 @@ const cache = new Map<string, CacheEntry>();
 const lastKnownStates = new Map<string, string | undefined>();
 const runningSince = new Map<string, number>();
 
-export type PowerSignal = 'start' | 'restart' | 'stop';
+export type PowerSignal = 'start' | 'restart' | 'stop' | 'kill';
 
 const getEnv = () => {
   const panelUrl = process.env.PTERO_PANEL_URL;
@@ -109,7 +109,19 @@ const withTimeout = async (url: string, token: string, init: RequestInit = { met
       throw new Error(`HTTP ${response.status}`);
     }
 
-    return (await response.json()) as unknown;
+    if (response.status === 204) {
+      return null;
+    }
+
+    const text = await response.text();
+    if (!text) return null;
+
+    const contentType = response.headers.get('content-type') ?? '';
+    if (contentType.includes('application/json')) {
+      return JSON.parse(text) as unknown;
+    }
+
+    return text as unknown;
   } finally {
     clearTimeout(timeout);
   }

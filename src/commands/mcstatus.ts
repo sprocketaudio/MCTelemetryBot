@@ -162,25 +162,25 @@ export async function handleMcStatusSelect(
   });
 }
 
-export type StatusAction = 'console' | 'restart' | 'stop' | 'start';
+export type StatusAction = 'console' | 'restart' | 'stop' | 'start' | 'kill';
 
 export const parseActionButton = (customId: string): StatusAction | null => {
   const match = customId.match(
-    new RegExp(`^${MCSTATUS_ACTION_CUSTOM_ID_PREFIX}:(console|restart|stop|start)$`)
+    new RegExp(`^${MCSTATUS_ACTION_CUSTOM_ID_PREFIX}:(console|restart|stop|start|kill)$`)
   );
   if (!match) return null;
   return match[1] as StatusAction;
 };
 
 interface ActionConfirmation {
-  action: Extract<StatusAction, 'restart' | 'stop'>;
+  action: Extract<StatusAction, 'restart' | 'stop' | 'kill'>;
   messageId: string;
   serverId: string;
 }
 
 export const parseActionConfirmation = (customId: string): ActionConfirmation | null => {
   const match = customId.match(
-    new RegExp(`^${MCSTATUS_CONFIRM_CUSTOM_ID_PREFIX}:(restart|stop):([^:]+):([^:]+)$`)
+    new RegExp(`^${MCSTATUS_CONFIRM_CUSTOM_ID_PREFIX}:(restart|stop|kill):([^:]+):([^:]+)$`)
   );
   if (!match) return null;
 
@@ -189,13 +189,13 @@ export const parseActionConfirmation = (customId: string): ActionConfirmation | 
 };
 
 const buildConfirmationModal = (
-  action: Extract<StatusAction, 'restart' | 'stop'>,
+  action: Extract<StatusAction, 'restart' | 'stop' | 'kill'>,
   messageId: string,
   serverId: string,
   serverName: string
 ) => {
-  const title = action === 'restart' ? 'Restart server' : 'Stop server';
-  const prompt = action === 'restart' ? 'Restart' : 'Stop';
+  const title = action === 'restart' ? 'Restart server' : action === 'stop' ? 'Stop server' : 'Kill server';
+  const prompt = action === 'restart' ? 'Restart' : action === 'stop' ? 'Stop' : 'Kill';
 
   return new ModalBuilder()
     .setCustomId(`${MCSTATUS_CONFIRM_CUSTOM_ID_PREFIX}:${action}:${messageId}:${serverId}`)
@@ -267,6 +267,12 @@ export async function handleMcStatusAction(
   }
 
   if (action === 'restart' || action === 'stop') {
+    const modal = buildConfirmationModal(action, interaction.message.id, targetServer.id, targetServer.name);
+    await interaction.showModal(modal);
+    return;
+  }
+
+  if (action === 'kill') {
     const modal = buildConfirmationModal(action, interaction.message.id, targetServer.id, targetServer.name);
     await interaction.showModal(modal);
     return;

@@ -308,6 +308,11 @@ export function buildViewComponents(
       .setStyle(ButtonStyle.Danger)
       .setDisabled(!selectedId),
     new ButtonBuilder()
+      .setCustomId(`${MCSTATUS_ACTION_CUSTOM_ID_PREFIX}:kill`)
+      .setLabel('Kill')
+      .setStyle(ButtonStyle.Danger)
+      .setDisabled(!selectedId),
+    new ButtonBuilder()
       .setCustomId(`${MCSTATUS_ACTION_CUSTOM_ID_PREFIX}:start`)
       .setLabel('Start')
       .setStyle(ButtonStyle.Success)
