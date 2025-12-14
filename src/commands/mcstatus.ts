@@ -1,6 +1,11 @@
 import { ButtonInteraction, ChatInputCommandInteraction, PermissionFlagsBits, SlashCommandBuilder } from 'discord.js';
 import { ServerConfig } from '../config/servers';
-import { buildRefreshComponents, buildStatusEmbed, fetchServerStatuses } from '../services/status';
+import {
+  StatusView,
+  buildStatusEmbed,
+  buildViewComponents,
+  fetchServerStatuses,
+} from '../services/status';
 import { isAdmin } from '../utils/permissions';
 
 export interface CommandContext {
@@ -30,12 +35,13 @@ export async function executeMcStatus(
   const statuses = await fetchServerStatuses(context.servers);
   const embed = buildStatusEmbed(context.servers, statuses, new Date());
 
-  await interaction.editReply({ embeds: [embed], components: buildRefreshComponents() });
+  await interaction.editReply({ embeds: [embed], components: buildViewComponents('status') });
 }
 
-export async function handleMcStatusRefresh(
+export async function handleMcStatusView(
   interaction: ButtonInteraction,
-  context: CommandContext
+  context: CommandContext,
+  view: StatusView
 ): Promise<void> {
   if (!isAdmin(interaction, context.adminRoleId)) {
     await interaction.reply({
@@ -48,7 +54,7 @@ export async function handleMcStatusRefresh(
   await interaction.deferUpdate();
 
   const statuses = await fetchServerStatuses(context.servers, { forceRefresh: true });
-  const embed = buildStatusEmbed(context.servers, statuses, new Date());
+  const embed = buildStatusEmbed(context.servers, statuses, new Date(), view);
 
-  await interaction.editReply({ embeds: [embed], components: buildRefreshComponents() });
+  await interaction.editReply({ embeds: [embed], components: buildViewComponents(view) });
 }

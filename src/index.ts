@@ -1,11 +1,11 @@
 import 'dotenv/config';
 import { Client, GatewayIntentBits, Interaction, REST, Routes, TextBasedChannel } from 'discord.js';
 import { executeMcDashboard, mcDashboardCommand } from './commands/mcdashboard';
-import { executeMcStatus, handleMcStatusRefresh, mcStatusCommand } from './commands/mcstatus';
-import { MCSTATUS_REFRESH_ID } from './config/constants';
+import { executeMcStatus, handleMcStatusView, mcStatusCommand } from './commands/mcstatus';
+import { MCSTATUS_VIEW_PLAYERS_ID, MCSTATUS_VIEW_STATUS_ID } from './config/constants';
 import { loadServers } from './config/servers';
 import { loadDashboardConfig, DashboardConfig } from './services/dashboardStore';
-import { buildRefreshComponents, buildStatusEmbed, fetchServerStatuses } from './services/status';
+import { buildStatusEmbed, buildViewComponents, fetchServerStatuses, getViewFromMessage } from './services/status';
 import { logger } from './utils/logger';
 
 const token = process.env.DISCORD_TOKEN;
@@ -49,9 +49,10 @@ async function refreshDashboard(options: { forceRefresh?: boolean } = {}) {
     const message = await textChannel.messages.fetch(dashboardConfig.messageId);
 
     const statuses = await fetchServerStatuses(servers, options);
-    const embed = buildStatusEmbed(servers, statuses, new Date());
+    const currentView = getViewFromMessage(message);
+    const embed = buildStatusEmbed(servers, statuses, new Date(), currentView);
 
-    await message.edit({ embeds: [embed], components: buildRefreshComponents() });
+    await message.edit({ embeds: [embed], components: buildViewComponents(currentView) });
   } catch (error) {
     logger.warn('Dashboard refresh failed; disabling auto-refresh until reconfigured.', error);
     if (dashboardInterval) {
@@ -102,8 +103,13 @@ client.on('interactionCreate', async (interaction: Interaction) => {
       return;
     }
 
-    if (interaction.isButton() && interaction.customId === MCSTATUS_REFRESH_ID) {
-      await handleMcStatusRefresh(interaction, { servers, adminRoleId });
+    if (interaction.isButton() && interaction.customId === MCSTATUS_VIEW_STATUS_ID) {
+      await handleMcStatusView(interaction, { servers, adminRoleId }, 'status');
+      return;
+    }
+
+    if (interaction.isButton() && interaction.customId === MCSTATUS_VIEW_PLAYERS_ID) {
+      await handleMcStatusView(interaction, { servers, adminRoleId }, 'players');
       return;
     }
   } catch (error) {

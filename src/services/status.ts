@@ -1,6 +1,6 @@
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from 'discord.js';
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, Message } from 'discord.js';
 import { ServerConfig } from '../config/servers';
-import { MCSTATUS_REFRESH_ID } from '../config/constants';
+import { MCSTATUS_VIEW_PLAYERS_ID, MCSTATUS_VIEW_STATUS_ID } from '../config/constants';
 import { PterodactylResources, fetchPterodactylResources } from './pterodactyl';
 import { TelemetryResponse, fetchTelemetry } from './telemetry';
 import { logger } from '../utils/logger';
@@ -11,6 +11,8 @@ export interface ServerStatus {
   pterodactyl?: PterodactylResources;
   pterodactylError?: Error;
 }
+
+export type StatusView = 'status' | 'players';
 
 export async function fetchServerStatuses(
   servers: ServerConfig[],
@@ -53,25 +55,31 @@ export async function fetchServerStatuses(
 const formatStatus = (state?: string) => {
   switch (state) {
     case 'running':
-      return '🟢 running';
+      return '🟢 Running';
     case 'starting':
-      return '🟡 starting';
+      return '🟡 Starting';
     case 'stopping':
-      return '🟠 stopping';
+      return '🟠 Stopping';
     case 'offline':
-      return '🔴 offline';
+      return '🔴 Offline';
     default:
       return '—';
   }
 };
 
-const formatPlayers = (telemetry?: TelemetryResponse) => {
+const formatPlayers = (telemetry?: TelemetryResponse, error?: Error) => {
+  if (error) return 'Player info unavailable';
   if (!telemetry) return '—';
   const players = telemetry.players ?? [];
-  if (players.length === 0) return '0';
+  if (players.length === 0) return 'No players online';
   const names = players.map((p) => p.name);
-  const suffix = names.length <= 5 ? ` (${names.join(', ')})` : '';
-  return `${players.length}${suffix}`;
+  return `Online (${players.length}): ${names.join(', ')}`;
+};
+
+const formatPlayerSummary = (telemetry?: TelemetryResponse, error?: Error) => {
+  if (error) return 'Players Online: unavailable';
+  if (!telemetry) return 'Players Online: —';
+  return `Players Online: ${telemetry.players?.length ?? 0}`;
 };
 
 const formatTpsMspt = (telemetry?: TelemetryResponse) => {
@@ -88,10 +96,10 @@ const formatBytesAsGb = (bytes?: number) => {
   return `${(value / 1024 / 1024 / 1024).toFixed(1)} GB`;
 };
 
-const formatCpu = (cpu?: number) => {
-  const value = toNumberOrUndefined(cpu);
-  if (value === undefined) return '—';
-  return `${value.toFixed(1)}%`;
+const formatPercent = (value?: number) => {
+  const numeric = toNumberOrUndefined(value);
+  if (numeric === undefined) return '—';
+  return `${numeric.toFixed(1)}%`;
 };
 
 const formatUptime = (uptimeMs?: number) => {
@@ -108,20 +116,76 @@ const formatUptime = (uptimeMs?: number) => {
   return `${seconds}s`;
 };
 
-const formatResources = (resources?: PterodactylResources) => {
-  const cpu = formatCpu(resources?.cpuAbsolute);
-  const memUsed = formatBytesAsGb(resources?.memoryBytes);
-  const memLimit = resources?.memoryLimitBytes ? formatBytesAsGb(resources.memoryLimitBytes) : '—';
-  const disk = formatBytesAsGb(resources?.diskBytes);
-  const uptime = formatUptime(resources?.uptimeMs);
+const calculatePercent = (used?: number, limit?: number) => {
+  const usedValue = toNumberOrUndefined(used);
+  const limitValue = toNumberOrUndefined(limit);
+  if (usedValue === undefined || limitValue === undefined || limitValue === 0) return undefined;
+  return (usedValue / limitValue) * 100;
+};
 
-  return `CPU: ${cpu} | MEM: ${memUsed}/${memLimit} | Disk: ${disk} | Uptime: ${uptime}`;
+const formatUsage = (used?: number, limit?: number) => {
+  const usedText = formatBytesAsGb(used);
+  const limitText = formatBytesAsGb(limit);
+  const percent = calculatePercent(used, limit);
+
+  const limitPart = limitText !== '—' ? ` / ${limitText}` : '';
+  const percentPart = percent !== undefined ? ` (${percent.toFixed(1)}%)` : '';
+
+  if (usedText === '—' && limitText === '—') return '—';
+  return `${usedText}${limitPart}${percentPart}`;
+};
+
+const isHot = (percent?: number) => percent !== undefined && percent > 90;
+
+const formatResources = (resources?: PterodactylResources) => {
+  const cpuPercent = toNumberOrUndefined(resources?.cpuAbsolute);
+  const memPercent = calculatePercent(resources?.memoryBytes, resources?.memoryLimitBytes);
+  const diskPercent = calculatePercent(resources?.diskBytes, resources?.diskLimitBytes);
+
+  const cpuIcon = isHot(cpuPercent) ? '🔥' : '🧠';
+  const memIcon = isHot(memPercent) ? '🔥' : '🧮';
+  const diskIcon = isHot(diskPercent) ? '🔥' : '💾';
+
+  const cpuText = `${cpuIcon} CPU ${formatPercent(cpuPercent)}`;
+  const memText = `${memIcon} RAM ${formatUsage(resources?.memoryBytes, resources?.memoryLimitBytes)}`;
+  const diskText = `${diskIcon} Disk ${formatUsage(resources?.diskBytes, resources?.diskLimitBytes)}`;
+  const uptimeText = `⏱ Uptime ${formatUptime(resources?.uptimeMs)}`;
+
+  return [`${cpuText} | ${memText}`, `${diskText} | ${uptimeText}`];
+};
+
+const formatStatusLines = (
+  telemetry?: TelemetryResponse,
+  resources?: PterodactylResources,
+  telemetryError?: Error
+) => {
+  const lines = [
+    `Status: ${formatStatus(resources?.currentState)}`,
+    `TPS/MSPT: ${formatTpsMspt(telemetry)}`,
+    formatPlayerSummary(telemetry, telemetryError),
+    ...formatResources(resources),
+  ];
+
+  return lines.join('\n');
+};
+
+const formatPlayerLines = (telemetry?: TelemetryResponse, telemetryError?: Error) => {
+  return formatPlayers(telemetry, telemetryError);
+};
+
+const formatFooterDate = (lastUpdated: Date) => {
+  return lastUpdated.toLocaleString('en-US', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    timeZone: 'UTC',
+  });
 };
 
 export const buildStatusEmbed = (
   servers: ServerConfig[],
   statuses: Map<string, ServerStatus>,
-  lastUpdated: Date
+  lastUpdated: Date,
+  view: StatusView = 'status'
 ) => {
   const embed = new EmbedBuilder().setTitle('Minecraft Server Status').setColor(0x2d3136);
 
@@ -130,23 +194,48 @@ export const buildStatusEmbed = (
     const telemetry = status?.telemetry;
     const pterodactyl = status?.pterodactyl;
 
-    const lines = [
-      `Status: ${formatStatus(pterodactyl?.currentState)}`,
-      `TPS/MSPT: ${formatTpsMspt(telemetry)}`,
-      `Players: ${formatPlayers(telemetry)}`,
-      formatResources(pterodactyl),
-    ];
+    const value =
+      view === 'status'
+        ? formatStatusLines(telemetry, pterodactyl, status?.telemetryError)
+        : formatPlayerLines(telemetry, status?.telemetryError);
 
     const name = server.pteroName ?? server.name;
-    embed.addFields({ name, value: lines.join('\n') });
+    embed.addFields({ name, value });
   });
 
-  embed.setFooter({ text: `Last update: <t:${Math.floor(lastUpdated.getTime() / 1000)}:R>` });
+  embed.setFooter({ text: `Last update: ${formatFooterDate(lastUpdated)} UTC` });
   return embed;
 };
 
-export const buildRefreshComponents = () => [
+export const buildViewComponents = (activeView: StatusView) => [
   new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId(MCSTATUS_REFRESH_ID).setLabel('Refresh').setStyle(ButtonStyle.Primary)
+    new ButtonBuilder()
+      .setCustomId(MCSTATUS_VIEW_STATUS_ID)
+      .setLabel('Status')
+      .setStyle(ButtonStyle.Primary)
+      .setDisabled(activeView === 'status'),
+    new ButtonBuilder()
+      .setCustomId(MCSTATUS_VIEW_PLAYERS_ID)
+      .setLabel('Players')
+      .setStyle(ButtonStyle.Primary)
+      .setDisabled(activeView === 'players')
   ),
 ];
+
+export const getViewFromMessage = (message: Message): StatusView => {
+  for (const row of message.components) {
+    const actionRow = (row as { components?: { customId?: string; disabled?: boolean }[] }).components;
+    if (!actionRow) continue;
+
+    for (const component of actionRow) {
+      if (component.customId === MCSTATUS_VIEW_PLAYERS_ID && component.disabled) {
+        return 'players';
+      }
+      if (component.customId === MCSTATUS_VIEW_STATUS_ID && component.disabled) {
+        return 'status';
+      }
+    }
+  }
+
+  return 'status';
+};

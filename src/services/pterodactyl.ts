@@ -7,6 +7,7 @@ export interface PterodactylResources {
   memoryBytes?: number;
   memoryLimitBytes?: number;
   diskBytes?: number;
+  diskLimitBytes?: number;
   networkRxBytes?: number;
   networkTxBytes?: number;
   uptimeMs?: number;
@@ -49,6 +50,8 @@ const validateAndParse = (payload: unknown): PterodactylResources => {
     memoryBytes: Number(resources.memory_bytes),
     memoryLimitBytes: resources.memory_limit_bytes !== undefined ? Number(resources.memory_limit_bytes) : undefined,
     diskBytes: Number(resources.disk_bytes),
+    diskLimitBytes:
+      resources.disk_limit_bytes !== undefined ? Number(resources.disk_limit_bytes) : undefined,
     networkRxBytes: Number(resources.network_rx_bytes),
     networkTxBytes: Number(resources.network_tx_bytes),
     uptimeMs: attributes.uptime !== undefined ? Number(attributes.uptime) : undefined,
