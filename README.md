@@ -1,11 +1,12 @@
 # MCTelementryBot
 
-A Discord bot for monitoring Minecraft servers via MCTelemetry endpoints. It provides a `/mcstatus` slash command with a refresh button to view TPS, MSPT, and player counts for configured servers.
+A Discord bot for monitoring Minecraft servers via MCTelemetry endpoints and Pterodactyl health data. It provides a `/mcstatus` slash command with a refresh button plus an auto-refreshing dashboard you can pin to a channel.
 
 ## Features
 - `/mcstatus` shows a compact embed of configured servers.
+- `/mcdashboard` sets up an auto-refreshing dashboard message in a chosen channel.
 - Refresh button updates the same message without spamming channels.
-- Telemetry responses cached for 10 seconds to reduce load.
+- Telemetry and Pterodactyl responses cached for 10 seconds to reduce load.
 - Administrator (or configured role) required to run the command or refresh.
 
 ## Prerequisites
@@ -20,11 +21,22 @@ A Discord bot for monitoring Minecraft servers via MCTelemetry endpoints. It pro
    ```bash
    npm install
    ```
-4. Create a `servers.json` file in the project root (or `./config/servers.json`):
+4. Create a `servers.json` file in the project root (or `./config/servers.json`) with telemetry and Pterodactyl identifiers:
    ```json
    [
-     { "id": "aof", "name": "Age Of Fate", "telemetryUrl": "http://188.40.107.48:28765/telemetry" },
-     { "id": "atm10", "name": "ATM10", "telemetryUrl": "http://188.40.107.48:28766/telemetry" }
+     {
+       "id": "aof",
+       "name": "Age Of Fate",
+       "telemetryUrl": "http://188.40.107.48:28765/telemetry",
+       "pteroIdentifier": "17cb1533",
+       "pteroName": "AOF Node"
+     },
+     {
+       "id": "atm10",
+       "name": "ATM10",
+       "telemetryUrl": "http://188.40.107.48:28766/telemetry",
+       "pteroIdentifier": "55aabb22"
+     }
    ]
    ```
 5. Set environment variables (use a `.env` file for convenience):
@@ -34,6 +46,12 @@ A Discord bot for monitoring Minecraft servers via MCTelemetry endpoints. It pro
    DISCORD_GUILD_ID=your_dev_guild_id
    # Optional: allow a specific role to use /mcstatus
    ADMIN_ROLE_ID=role_id
+   PTERO_PANEL_URL=https://panel.example.com
+   PTERO_CLIENT_TOKEN=client_api_token
+   ```
+6. (Optional) Pre-seed `dashboard.json` in the repo root if you already know the dashboard message info:
+   ```json
+   { "guildId": "123", "channelId": "456", "messageId": "789" }
    ```
 
 ## Scripts
@@ -56,5 +74,6 @@ npm start
 ```
 
 ## Notes
-- Telemetry fetches timeout after 2 seconds; failed servers show as `OFFLINE/NO DATA` while errors are logged with timestamps.
-- Cached telemetry is reused for 10 seconds unless the refresh button is clicked.
+- Telemetry and Pterodactyl fetches timeout after 2 seconds; failed servers show placeholders while errors are logged with timestamps.
+- Cached data is reused for 10 seconds unless the refresh button is clicked.
+- `/mcdashboard` stores the dashboard message reference in `dashboard.json` and updates the same message every 10 seconds.

@@ -1,3 +1,9 @@
 [
-  { "id": "Server_ID", "name": "Server Name", "telemetryUrl": "http://<ip>:<port>/telemetry" }
+  {
+    "id": "Server_ID",
+    "name": "Server Name",
+    "telemetryUrl": "http://<ip>:<port>/telemetry",
+    "pteroIdentifier": "ptero-server-id",
+    "pteroName": "Optional dashboard name"
+  }
 ]
