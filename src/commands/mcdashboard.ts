@@ -7,17 +7,21 @@ import {
   SlashCommandChannelOption,
   TextBasedChannel,
   GuildTextBasedChannel,
+  User,
 } from 'discord.js';
 import { DashboardConfig, loadDashboardConfig, saveDashboardConfig } from '../services/dashboardStore';
 import { buildDefaultState, buildStatusEmbeds, buildViewComponents, fetchServerStatuses } from '../services/status';
 import { isAdmin } from '../utils/permissions';
 import { logger } from '../utils/logger';
 import { ServerConfig } from '../config/servers';
+import { editReplyWithExpiry, sendTemporaryReply } from '../utils/messages';
+import { AuditLogEntry } from '../services/auditLogger';
 
 export interface DashboardContext {
   servers: ServerConfig[];
   adminRoleId?: string;
   onConfigured?: (config: DashboardConfig) => Promise<void> | void;
+  logAudit?: (entry: AuditLogEntry, user: User) => Promise<void> | void;
 }
 
 const SUPPORTED_CHANNELS = [ChannelType.GuildText, ChannelType.GuildAnnouncement] as const;
@@ -43,10 +47,7 @@ export async function executeMcDashboard(
   context: DashboardContext
 ): Promise<void> {
   if (!isAdmin(interaction, context.adminRoleId)) {
-    await interaction.reply({
-      content: 'You need Administrator permissions to use this command.',
-      ephemeral: true,
-    });
+    await sendTemporaryReply(interaction, 'You need Administrator permissions to use this command.');
     return;
   }
 
@@ -54,16 +55,13 @@ export async function executeMcDashboard(
   const isSupportedChannel =
     channel.type === ChannelType.GuildText || channel.type === ChannelType.GuildAnnouncement;
   if (!isSupportedChannel) {
-    await interaction.reply({
-      content: 'Please select a text channel.',
-      ephemeral: true,
-    });
+    await sendTemporaryReply(interaction, 'Please select a text channel.');
     return;
   }
 
   const selectedChannel = channel as GuildTextBasedChannel;
 
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply();
 
   const statuses = await fetchServerStatuses(context.servers, { forceRefresh: true });
   const state = buildDefaultState();
@@ -113,5 +111,9 @@ export async function executeMcDashboard(
     await context.onConfigured(config);
   }
 
-  await interaction.editReply({ content: 'Dashboard configured' });
+  await editReplyWithExpiry(interaction, 'Dashboard configured');
+  context.logAudit?.(
+    { action: `Configured dashboard in ${selectedChannel.toString()}.`, emoji: '🛠️', style: 'primary' },
+    interaction.user
+  );
 }

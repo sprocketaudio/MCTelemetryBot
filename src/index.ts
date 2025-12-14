@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { Client, GatewayIntentBits, Interaction, REST, Routes, TextBasedChannel } from 'discord.js';
+import { Client, GatewayIntentBits, Interaction, REST, Routes, TextBasedChannel, User } from 'discord.js';
 import { executeMcDashboard, mcDashboardCommand } from './commands/mcdashboard';
 import {
   executeMcStatus,
@@ -11,6 +11,7 @@ import {
   parseActionButton,
   parseActionConfirmation,
 } from './commands/mcstatus';
+import { executeMcAudit, mcAuditCommand } from './commands/mcaudit';
 import {
   MCSTATUS_ACTION_CUSTOM_ID_PREFIX,
   MCSTATUS_CONFIRM_CUSTOM_ID_PREFIX,
@@ -19,6 +20,7 @@ import {
 } from './config/constants';
 import { loadServers } from './config/servers';
 import { loadDashboardConfig, DashboardConfig } from './services/dashboardStore';
+import { AuditConfig, loadAuditConfig } from './services/auditStore';
 import {
   DashboardState,
   buildDefaultState,
@@ -28,7 +30,9 @@ import {
   getDashboardStateFromMessage,
   parseViewButton,
 } from './services/status';
+import { AuditLogEntry, sendAuditLog } from './services/auditLogger';
 import { logger } from './utils/logger';
+import { sendTemporaryReply } from './utils/messages';
 
 const token = process.env.DISCORD_TOKEN;
 const clientId = process.env.DISCORD_CLIENT_ID;
@@ -45,15 +49,20 @@ const resolvedGuildId = guildId!;
 
 const servers = loadServers();
 let dashboardConfig: DashboardConfig | null = loadDashboardConfig();
+let auditConfig: AuditConfig | null = loadAuditConfig();
 let dashboardInterval: NodeJS.Timeout | null = null;
 const messageStates = new Map<string, DashboardState>();
+
+const logAudit = async (entry: AuditLogEntry, user: User) => {
+  await sendAuditLog(client, auditConfig, entry, user);
+};
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 const rest = new REST({ version: '10' }).setToken(resolvedToken);
 
 async function registerCommands() {
-  const commands = [mcStatusCommand.toJSON(), mcDashboardCommand.toJSON()];
+  const commands = [mcStatusCommand.toJSON(), mcDashboardCommand.toJSON(), mcAuditCommand.toJSON()];
   logger.info('Registering slash commands');
   await rest.put(Routes.applicationGuildCommands(resolvedClientId, resolvedGuildId), { body: commands });
   logger.info('Commands registered');
@@ -71,11 +80,11 @@ async function refreshDashboard(options: { forceRefresh?: boolean } = {}) {
     const textChannel = channel as TextBasedChannel;
     const message = await textChannel.messages.fetch(dashboardConfig.messageId);
 
-  const statuses = await fetchServerStatuses(servers, options);
-  const currentState = messageStates.get(message.id) ?? getDashboardStateFromMessage(message, servers);
-  if (!servers.some((server) => server.id === currentState.selectedServerId)) {
-    currentState.selectedServerId = null;
-  }
+    const statuses = await fetchServerStatuses(servers, options);
+    const currentState = messageStates.get(message.id) ?? getDashboardStateFromMessage(message, servers);
+    if (!servers.some((server) => server.id === currentState.selectedServerId)) {
+      currentState.selectedServerId = null;
+    }
     messageStates.set(message.id, currentState);
     const embeds = buildStatusEmbeds(
       servers,
@@ -132,6 +141,7 @@ client.on('interactionCreate', async (interaction: Interaction) => {
           }
         },
         getState: (messageId) => messageStates.get(messageId) ?? null,
+        logAudit: (entry, user) => logAudit(entry, user),
       });
       return;
     }
@@ -145,6 +155,18 @@ client.on('interactionCreate', async (interaction: Interaction) => {
           messageStates.set(config.messageId, buildDefaultState());
           startDashboardLoop();
         },
+        logAudit: (entry, user) => logAudit(entry, user),
+      });
+      return;
+    }
+
+    if (interaction.isChatInputCommand() && interaction.commandName === mcAuditCommand.name) {
+      await executeMcAudit(interaction, {
+        adminRoleId,
+        onConfigured: (config) => {
+          auditConfig = config;
+        },
+        logAudit: (entry, user) => logAudit(entry, user),
       });
       return;
     }
@@ -161,6 +183,7 @@ client.on('interactionCreate', async (interaction: Interaction) => {
           }
         },
         getState: (messageId) => messageStates.get(messageId) ?? null,
+        logAudit: (entry, user) => logAudit(entry, user),
       }, parsedView);
       return;
     }
@@ -175,6 +198,7 @@ client.on('interactionCreate', async (interaction: Interaction) => {
           }
         },
         getState: (messageId) => messageStates.get(messageId) ?? null,
+        logAudit: (entry, user) => logAudit(entry, user),
       });
       return;
     }
@@ -186,6 +210,7 @@ client.on('interactionCreate', async (interaction: Interaction) => {
         servers,
         adminRoleId,
         getState: (messageId) => messageStates.get(messageId) ?? null,
+        logAudit: (entry, user) => logAudit(entry, user),
       }, parsedAction);
       return;
     }
@@ -197,6 +222,7 @@ client.on('interactionCreate', async (interaction: Interaction) => {
         servers,
         adminRoleId,
         getState: (messageId) => messageStates.get(messageId) ?? null,
+        logAudit: (entry, user) => logAudit(entry, user),
       }, parsedConfirmation);
       return;
     }
@@ -204,11 +230,7 @@ client.on('interactionCreate', async (interaction: Interaction) => {
     logger.error('Interaction handling failed', error);
     if (interaction.isRepliable()) {
       const content = 'Something went wrong while handling that interaction.';
-      if (interaction.deferred || interaction.replied) {
-        await interaction.editReply({ content });
-      } else {
-        await interaction.reply({ content, ephemeral: true });
-      }
+      await sendTemporaryReply(interaction, content);
     }
   }
 });
