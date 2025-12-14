@@ -10,6 +10,7 @@ import {
   StringSelectMenuInteraction,
   TextInputBuilder,
   TextInputStyle,
+  User,
 } from 'discord.js';
 import { ServerConfig } from '../config/servers';
 import {
@@ -24,12 +25,14 @@ import {
 import { MCSTATUS_ACTION_CUSTOM_ID_PREFIX, MCSTATUS_CONFIRM_CUSTOM_ID_PREFIX } from '../config/constants';
 import { buildPanelConsoleUrl, sendPowerSignal } from '../services/pterodactyl';
 import { isAdmin } from '../utils/permissions';
+import { editReplyWithExpiry, sendTemporaryReply } from '../utils/messages';
 
 export interface CommandContext {
   servers: ServerConfig[];
   adminRoleId?: string;
   onStateChange?: (state: DashboardState, messageId?: string) => void;
   getState?: (messageId: string) => DashboardState | null;
+  logAudit?: (action: string, user: User) => Promise<void> | void;
 }
 
 export const mcStatusCommand = new SlashCommandBuilder()
@@ -42,10 +45,7 @@ export async function executeMcStatus(
   context: CommandContext
 ): Promise<void> {
   if (!isAdmin(interaction, context.adminRoleId)) {
-    await interaction.reply({
-      content: 'You need Administrator permissions to use this command.',
-      ephemeral: true,
-    });
+    await sendTemporaryReply(interaction, 'You need Administrator permissions to use this command.');
     return;
   }
 
@@ -82,10 +82,7 @@ export async function handleMcStatusView(
   view: StatusView
 ): Promise<void> {
   if (!isAdmin(interaction, context.adminRoleId)) {
-    await interaction.reply({
-      content: 'You need Administrator permissions to refresh this status.',
-      ephemeral: true,
-    });
+    await sendTemporaryReply(interaction, 'You need Administrator permissions to refresh this status.');
     return;
   }
 
@@ -96,7 +93,7 @@ export async function handleMcStatusView(
     await interaction.editReply({
       components: buildViewComponents(context.servers, currentState.selectedServerId, currentState.serverViews),
     });
-    await interaction.followUp({ content: 'Select a server first.', ephemeral: true });
+    await sendTemporaryReply(interaction, 'Select a server first.');
     return;
   }
 
@@ -126,10 +123,7 @@ export async function handleMcStatusSelect(
   context: CommandContext
 ): Promise<void> {
   if (!isAdmin(interaction, context.adminRoleId)) {
-    await interaction.reply({
-      content: 'You need Administrator permissions to refresh this status.',
-      ephemeral: true,
-    });
+    await sendTemporaryReply(interaction, 'You need Administrator permissions to refresh this status.');
     return;
   }
 
@@ -238,31 +232,25 @@ export async function handleMcStatusAction(
   action: StatusAction
 ): Promise<void> {
   if (!isAdmin(interaction, context.adminRoleId)) {
-    await interaction.reply({
-      content: 'You need Administrator permissions to perform this action.',
-      ephemeral: true,
-    });
+    await sendTemporaryReply(interaction, 'You need Administrator permissions to perform this action.');
     return;
   }
 
   const currentState = resolveState(interaction, context);
   if (!currentState.selectedServerId) {
-    await interaction.reply({ content: 'Select a server first.', ephemeral: true });
+    await sendTemporaryReply(interaction, 'Select a server first.');
     return;
   }
 
   const targetServer = context.servers.find((server) => server.id === currentState.selectedServerId);
   if (!targetServer) {
-    await interaction.reply({ content: 'Selected server is no longer available.', ephemeral: true });
+    await sendTemporaryReply(interaction, 'Selected server is no longer available.');
     return;
   }
 
   if (action === 'console') {
     const consoleUrl = buildPanelConsoleUrl(targetServer);
-    await interaction.reply({
-      content: `Open console for **${targetServer.name}**: ${consoleUrl}`,
-      ephemeral: true,
-    });
+    await sendTemporaryReply(interaction, `Open console for **${targetServer.name}**: ${consoleUrl}`);
     return;
   }
 
@@ -279,14 +267,16 @@ export async function handleMcStatusAction(
   }
 
   if (action === 'start') {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply();
     try {
       await sendPowerSignal(targetServer, 'start');
-      await interaction.editReply({ content: `Sent start command to **${targetServer.name}**.` });
+      await editReplyWithExpiry(interaction, `Sent start command to **${targetServer.name}**.`);
+      context.logAudit?.(`requested start for **${targetServer.name}**`, interaction.user);
     } catch (error) {
-      await interaction.editReply({
-        content: `Failed to start **${targetServer.name}**: ${(error as Error).message}`,
-      });
+      await editReplyWithExpiry(
+        interaction,
+        `Failed to start **${targetServer.name}**: ${(error as Error).message}`
+      );
       return;
     }
 
@@ -301,38 +291,32 @@ export async function handleMcStatusActionConfirm(
   parsed: ActionConfirmation
 ): Promise<void> {
   if (!isAdmin(interaction, context.adminRoleId)) {
-    await interaction.reply({
-      content: 'You need Administrator permissions to perform this action.',
-      ephemeral: true,
-    });
+    await sendTemporaryReply(interaction, 'You need Administrator permissions to perform this action.');
     return;
   }
 
   const confirmation = interaction.fields.getTextInputValue('confirm_action')?.trim();
   if (!confirmation || confirmation.toLowerCase() !== parsed.action.toLowerCase()) {
-    await interaction.reply({
-      content: `Confirmation failed. Type "${parsed.action}" to proceed.`,
-      ephemeral: true,
-    });
+    await sendTemporaryReply(interaction, `Confirmation failed. Type "${parsed.action}" to proceed.`);
     return;
   }
 
   const targetServer = context.servers.find((server) => server.id === parsed.serverId);
   if (!targetServer) {
-    await interaction.reply({ content: 'Selected server is no longer available.', ephemeral: true });
+    await sendTemporaryReply(interaction, 'Selected server is no longer available.');
     return;
   }
 
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply();
   try {
     await sendPowerSignal(targetServer, parsed.action);
-    await interaction.editReply({
-      content: `Sent ${parsed.action} command to **${targetServer.name}**.`,
-    });
+    await editReplyWithExpiry(interaction, `Sent ${parsed.action} command to **${targetServer.name}**.`);
+    context.logAudit?.(`requested ${parsed.action} for **${targetServer.name}**`, interaction.user);
   } catch (error) {
-    await interaction.editReply({
-      content: `Failed to ${parsed.action} **${targetServer.name}**: ${(error as Error).message}`,
-    });
+    await editReplyWithExpiry(
+      interaction,
+      `Failed to ${parsed.action} **${targetServer.name}**: ${(error as Error).message}`
+    );
     return;
   }
 
