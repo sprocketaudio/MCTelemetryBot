@@ -6,6 +6,8 @@ export interface ServerConfig {
   id: string;
   name: string;
   telemetryUrl: string;
+  pteroIdentifier: string;
+  pteroName?: string;
 }
 
 const serverFileCandidates = [
@@ -47,7 +49,7 @@ export function loadServers(): ServerConfig[] {
       throw new Error(`Server entry at index ${index} is not an object.`);
     }
 
-    const { id, name, telemetryUrl } = item as Partial<ServerConfig>;
+    const { id, name, telemetryUrl, pteroIdentifier, pteroName } = item as Partial<ServerConfig>;
 
     if (!id || typeof id !== 'string') {
       throw new Error(`Server entry at index ${index} is missing an id.`);
@@ -63,7 +65,11 @@ export function loadServers(): ServerConfig[] {
       );
     }
 
-    return { id, name, telemetryUrl };
+    if (!pteroIdentifier || typeof pteroIdentifier !== 'string') {
+      throw new Error(`Server entry at index ${index} is missing a pteroIdentifier.`);
+    }
+
+    return { id, name, telemetryUrl, pteroIdentifier, pteroName };
   });
 
   logger.info(`Loaded ${servers.length} servers from ${filePath}`);
