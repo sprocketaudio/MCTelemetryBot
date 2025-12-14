@@ -4,13 +4,16 @@ import { executeMcDashboard, mcDashboardCommand } from './commands/mcdashboard';
 import {
   executeMcStatus,
   handleMcStatusAction,
+  handleMcStatusActionConfirm,
   handleMcStatusSelect,
   handleMcStatusView,
   mcStatusCommand,
   parseActionButton,
+  parseActionConfirmation,
 } from './commands/mcstatus';
 import {
   MCSTATUS_ACTION_CUSTOM_ID_PREFIX,
+  MCSTATUS_CONFIRM_CUSTOM_ID_PREFIX,
   MCSTATUS_SELECT_CUSTOM_ID,
   MCSTATUS_VIEW_CUSTOM_ID_PREFIX,
 } from './config/constants';
@@ -184,6 +187,17 @@ client.on('interactionCreate', async (interaction: Interaction) => {
         adminRoleId,
         getState: (messageId) => messageStates.get(messageId) ?? null,
       }, parsedAction);
+      return;
+    }
+
+    if (interaction.isModalSubmit() && interaction.customId.startsWith(MCSTATUS_CONFIRM_CUSTOM_ID_PREFIX)) {
+      const parsedConfirmation = parseActionConfirmation(interaction.customId);
+      if (!parsedConfirmation) return;
+      await handleMcStatusActionConfirm(interaction, {
+        servers,
+        adminRoleId,
+        getState: (messageId) => messageStates.get(messageId) ?? null,
+      }, parsedConfirmation);
       return;
     }
   } catch (error) {

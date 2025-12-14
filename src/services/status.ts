@@ -300,7 +300,7 @@ export function buildViewComponents(
     new ButtonBuilder()
       .setCustomId(`${MCSTATUS_ACTION_CUSTOM_ID_PREFIX}:restart`)
       .setLabel('Restart')
-      .setStyle(ButtonStyle.Secondary)
+      .setStyle(ButtonStyle.Danger)
       .setDisabled(!selectedId),
     new ButtonBuilder()
       .setCustomId(`${MCSTATUS_ACTION_CUSTOM_ID_PREFIX}:stop`)

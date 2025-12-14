@@ -1,9 +1,15 @@
 import {
+  ActionRowBuilder,
   ButtonInteraction,
   ChatInputCommandInteraction,
+  Message,
+  ModalBuilder,
+  ModalSubmitInteraction,
   PermissionFlagsBits,
   SlashCommandBuilder,
   StringSelectMenuInteraction,
+  TextInputBuilder,
+  TextInputStyle,
 } from 'discord.js';
 import { ServerConfig } from '../config/servers';
 import {
@@ -15,7 +21,8 @@ import {
   fetchServerStatuses,
   getDashboardStateFromMessage,
 } from '../services/status';
-import { MCSTATUS_ACTION_CUSTOM_ID_PREFIX } from '../config/constants';
+import { MCSTATUS_ACTION_CUSTOM_ID_PREFIX, MCSTATUS_CONFIRM_CUSTOM_ID_PREFIX } from '../config/constants';
+import { buildPanelConsoleUrl, sendPowerSignal } from '../services/pterodactyl';
 import { isAdmin } from '../utils/permissions';
 
 export interface CommandContext {
@@ -165,6 +172,66 @@ export const parseActionButton = (customId: string): StatusAction | null => {
   return match[1] as StatusAction;
 };
 
+interface ActionConfirmation {
+  action: Extract<StatusAction, 'restart' | 'stop'>;
+  messageId: string;
+  serverId: string;
+}
+
+export const parseActionConfirmation = (customId: string): ActionConfirmation | null => {
+  const match = customId.match(
+    new RegExp(`^${MCSTATUS_CONFIRM_CUSTOM_ID_PREFIX}:(restart|stop):([^:]+):([^:]+)$`)
+  );
+  if (!match) return null;
+
+  const [, action, messageId, serverId] = match;
+  return { action: action as ActionConfirmation['action'], messageId, serverId };
+};
+
+const buildConfirmationModal = (
+  action: Extract<StatusAction, 'restart' | 'stop'>,
+  messageId: string,
+  serverId: string,
+  serverName: string
+) => {
+  const title = action === 'restart' ? 'Restart server' : 'Stop server';
+  const prompt = action === 'restart' ? 'Restart' : 'Stop';
+
+  return new ModalBuilder()
+    .setCustomId(`${MCSTATUS_CONFIRM_CUSTOM_ID_PREFIX}:${action}:${messageId}:${serverId}`)
+    .setTitle(title)
+    .addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder()
+          .setCustomId('confirm_action')
+          .setLabel(`Type ${prompt} to confirm ${serverName}`)
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setPlaceholder(prompt)
+      )
+    );
+};
+
+const refreshDashboardMessage = async (
+  message: Message,
+  state: DashboardState,
+  context: CommandContext
+) => {
+  const statuses = await fetchServerStatuses(context.servers, { forceRefresh: true });
+  const embeds = buildStatusEmbeds(
+    context.servers,
+    statuses,
+    new Date(),
+    state.serverViews,
+    state.selectedServerId
+  );
+
+  await message.edit({
+    embeds,
+    components: buildViewComponents(context.servers, state.selectedServerId, state.serverViews),
+  });
+};
+
 export async function handleMcStatusAction(
   interaction: ButtonInteraction,
   context: CommandContext,
@@ -190,8 +257,89 @@ export async function handleMcStatusAction(
     return;
   }
 
-  await interaction.reply({
-    content: `Action "${action}" for **${targetServer.name}** is not implemented yet.`,
-    ephemeral: true,
-  });
+  if (action === 'console') {
+    const consoleUrl = buildPanelConsoleUrl(targetServer);
+    await interaction.reply({
+      content: `Open console for **${targetServer.name}**: ${consoleUrl}`,
+      ephemeral: true,
+    });
+    return;
+  }
+
+  if (action === 'restart' || action === 'stop') {
+    const modal = buildConfirmationModal(action, interaction.message.id, targetServer.id, targetServer.name);
+    await interaction.showModal(modal);
+    return;
+  }
+
+  if (action === 'start') {
+    await interaction.deferReply({ ephemeral: true });
+    try {
+      await sendPowerSignal(targetServer, 'start');
+      await interaction.editReply({ content: `Sent start command to **${targetServer.name}**.` });
+    } catch (error) {
+      await interaction.editReply({
+        content: `Failed to start **${targetServer.name}**: ${(error as Error).message}`,
+      });
+      return;
+    }
+
+    await refreshDashboardMessage(interaction.message, currentState, context);
+    return;
+  }
+}
+
+export async function handleMcStatusActionConfirm(
+  interaction: ModalSubmitInteraction,
+  context: CommandContext,
+  parsed: ActionConfirmation
+): Promise<void> {
+  if (!isAdmin(interaction, context.adminRoleId)) {
+    await interaction.reply({
+      content: 'You need Administrator permissions to perform this action.',
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const confirmation = interaction.fields.getTextInputValue('confirm_action')?.trim();
+  if (!confirmation || confirmation.toLowerCase() !== parsed.action.toLowerCase()) {
+    await interaction.reply({
+      content: `Confirmation failed. Type "${parsed.action}" to proceed.`,
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const targetServer = context.servers.find((server) => server.id === parsed.serverId);
+  if (!targetServer) {
+    await interaction.reply({ content: 'Selected server is no longer available.', ephemeral: true });
+    return;
+  }
+
+  await interaction.deferReply({ ephemeral: true });
+  try {
+    await sendPowerSignal(targetServer, parsed.action);
+    await interaction.editReply({
+      content: `Sent ${parsed.action} command to **${targetServer.name}**.`,
+    });
+  } catch (error) {
+    await interaction.editReply({
+      content: `Failed to ${parsed.action} **${targetServer.name}**: ${(error as Error).message}`,
+    });
+    return;
+  }
+
+  const state = context.getState?.(parsed.messageId) ?? buildDefaultState();
+  if (!state.selectedServerId) {
+    state.selectedServerId = parsed.serverId;
+    state.serverViews[parsed.serverId] = state.serverViews[parsed.serverId] ?? 'status';
+  }
+
+  if (interaction.channel && interaction.channel.isTextBased()) {
+    const message = await interaction.channel.messages.fetch(parsed.messageId).catch(() => null);
+    if (message) {
+      await refreshDashboardMessage(message, state, context);
+    }
+  }
 }
