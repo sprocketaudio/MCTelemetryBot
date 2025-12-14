@@ -90,12 +90,6 @@ const formatTpsMspt = (telemetry?: TelemetryResponse) => {
 const toNumberOrUndefined = (value: number | undefined) =>
   typeof value === 'number' && !Number.isNaN(value) ? value : undefined;
 
-const formatBytesAsGb = (bytes?: number) => {
-  const value = toNumberOrUndefined(bytes);
-  if (value === undefined) return '—';
-  return `${(value / 1024 / 1024 / 1024).toFixed(1)} GB`;
-};
-
 const formatPercent = (value?: number) => {
   const numeric = toNumberOrUndefined(value);
   if (numeric === undefined) return '—';
@@ -123,18 +117,6 @@ const calculatePercent = (used?: number, limit?: number) => {
   return (usedValue / limitValue) * 100;
 };
 
-const formatUsage = (used?: number, limit?: number) => {
-  const usedText = formatBytesAsGb(used);
-  const limitText = formatBytesAsGb(limit);
-  const percent = calculatePercent(used, limit);
-
-  const limitPart = limitText !== '—' ? ` / ${limitText}` : '';
-  const percentPart = percent !== undefined ? ` (${percent.toFixed(1)}%)` : '';
-
-  if (usedText === '—' && limitText === '—') return '—';
-  return `${usedText}${limitPart}${percentPart}`;
-};
-
 const isHot = (percent?: number) => percent !== undefined && percent > 90;
 
 const formatResources = (resources?: PterodactylResources) => {
@@ -149,14 +131,12 @@ const formatResources = (resources?: PterodactylResources) => {
   const diskIcon = isHot(diskPercent) ? '🔥' : '💾';
 
   const cpuText = `${cpuIcon} CPU ${formatPercent(cpuPercent)}`;
-  const memText = `${memIcon} RAM ${formatUsage(resources?.memoryBytes, resources?.memoryLimitBytes)}`;
-  const diskText = `${diskIcon} Disk ${formatUsage(resources?.diskBytes, resources?.diskLimitBytes)}`;
+  const memText = `${memIcon} RAM ${formatPercent(memPercent)}`;
+  const diskText = `${diskIcon} Disk ${formatPercent(diskPercent)}`;
   const uptimeText = resources?.uptimeMs !== undefined ? `⏱ Uptime ${formatUptime(resources?.uptimeMs)}` : null;
-  const lines = [`${cpuText} | ${memText}`];
+  const lines = [cpuText, memText, diskText];
   if (uptimeText) {
-    lines.push(`${diskText} | ${uptimeText}`);
-  } else {
-    lines.push(diskText);
+    lines.push(uptimeText);
   }
 
   return lines;
@@ -168,11 +148,16 @@ const formatStatusLines = (
   telemetryError?: Error
 ) => {
   const lines = [
+    '',
     formatStatus(resources?.currentState),
-    formatTpsMspt(telemetry),
     formatPlayerSummary(telemetry, telemetryError),
-    ...formatResources(resources),
+    formatTpsMspt(telemetry),
   ];
+
+  const resourceLines = formatResources(resources);
+  if (resourceLines.length > 0) {
+    lines.push('', ...resourceLines);
+  }
 
   return lines.join('\n');
 };
