@@ -26,13 +26,14 @@ import { MCSTATUS_ACTION_CUSTOM_ID_PREFIX, MCSTATUS_CONFIRM_CUSTOM_ID_PREFIX } f
 import { buildPanelConsoleUrl, sendPowerSignal } from '../services/pterodactyl';
 import { isAdmin } from '../utils/permissions';
 import { editReplyWithExpiry, sendTemporaryReply } from '../utils/messages';
+import { AuditLogEntry, AuditStyle } from '../services/auditLogger';
 
 export interface CommandContext {
   servers: ServerConfig[];
   adminRoleId?: string;
   onStateChange?: (state: DashboardState, messageId?: string) => void;
   getState?: (messageId: string) => DashboardState | null;
-  logAudit?: (action: string, user: User) => Promise<void> | void;
+  logAudit?: (entry: AuditLogEntry, user: User) => Promise<void> | void;
 }
 
 export const mcStatusCommand = new SlashCommandBuilder()
@@ -158,6 +159,19 @@ export async function handleMcStatusSelect(
 
 export type StatusAction = 'console' | 'restart' | 'stop' | 'start' | 'kill';
 
+const ACTION_AUDIT_DETAILS: Record<StatusAction, { emoji: string; style: AuditStyle; label: string }> = {
+  console: { emoji: '🖥️', style: 'secondary', label: 'Opened console for' },
+  restart: { emoji: '🔁', style: 'danger', label: 'Restart requested for' },
+  stop: { emoji: '🛑', style: 'danger', label: 'Stop requested for' },
+  kill: { emoji: '💀', style: 'danger', label: 'Kill requested for' },
+  start: { emoji: '▶️', style: 'success', label: 'Start requested for' },
+};
+
+const buildActionAuditEntry = (action: StatusAction, serverName: string): AuditLogEntry => {
+  const details = ACTION_AUDIT_DETAILS[action];
+  return { action: `${details.label} **${serverName}**.`, emoji: details.emoji, style: details.style };
+};
+
 export const parseActionButton = (customId: string): StatusAction | null => {
   const match = customId.match(
     new RegExp(`^${MCSTATUS_ACTION_CUSTOM_ID_PREFIX}:(console|restart|stop|start|kill)$`)
@@ -251,6 +265,7 @@ export async function handleMcStatusAction(
   if (action === 'console') {
     const consoleUrl = buildPanelConsoleUrl(targetServer);
     await sendTemporaryReply(interaction, `Open console for **${targetServer.name}**: ${consoleUrl}`);
+    context.logAudit?.(buildActionAuditEntry('console', targetServer.name), interaction.user);
     return;
   }
 
@@ -271,7 +286,7 @@ export async function handleMcStatusAction(
     try {
       await sendPowerSignal(targetServer, 'start');
       await editReplyWithExpiry(interaction, `Sent start command to **${targetServer.name}**.`);
-      context.logAudit?.(`requested start for **${targetServer.name}**`, interaction.user);
+      context.logAudit?.(buildActionAuditEntry('start', targetServer.name), interaction.user);
     } catch (error) {
       await editReplyWithExpiry(
         interaction,
@@ -311,7 +326,7 @@ export async function handleMcStatusActionConfirm(
   try {
     await sendPowerSignal(targetServer, parsed.action);
     await editReplyWithExpiry(interaction, `Sent ${parsed.action} command to **${targetServer.name}**.`);
-    context.logAudit?.(`requested ${parsed.action} for **${targetServer.name}**`, interaction.user);
+    context.logAudit?.(buildActionAuditEntry(parsed.action, targetServer.name), interaction.user);
   } catch (error) {
     await editReplyWithExpiry(
       interaction,

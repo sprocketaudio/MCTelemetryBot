@@ -30,7 +30,7 @@ import {
   getDashboardStateFromMessage,
   parseViewButton,
 } from './services/status';
-import { sendAuditLog } from './services/auditLogger';
+import { AuditLogEntry, sendAuditLog } from './services/auditLogger';
 import { logger } from './utils/logger';
 import { sendTemporaryReply } from './utils/messages';
 
@@ -53,8 +53,8 @@ let auditConfig: AuditConfig | null = loadAuditConfig();
 let dashboardInterval: NodeJS.Timeout | null = null;
 const messageStates = new Map<string, DashboardState>();
 
-const logAudit = async (action: string, user: User) => {
-  await sendAuditLog(client, auditConfig, action, user);
+const logAudit = async (entry: AuditLogEntry, user: User) => {
+  await sendAuditLog(client, auditConfig, entry, user);
 };
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
@@ -141,7 +141,7 @@ client.on('interactionCreate', async (interaction: Interaction) => {
           }
         },
         getState: (messageId) => messageStates.get(messageId) ?? null,
-        logAudit: (action, user) => logAudit(action, user),
+        logAudit: (entry, user) => logAudit(entry, user),
       });
       return;
     }
@@ -155,7 +155,7 @@ client.on('interactionCreate', async (interaction: Interaction) => {
           messageStates.set(config.messageId, buildDefaultState());
           startDashboardLoop();
         },
-        logAudit: (action, user) => logAudit(action, user),
+        logAudit: (entry, user) => logAudit(entry, user),
       });
       return;
     }
@@ -166,7 +166,7 @@ client.on('interactionCreate', async (interaction: Interaction) => {
         onConfigured: (config) => {
           auditConfig = config;
         },
-        logAudit: (action, user) => logAudit(action, user),
+        logAudit: (entry, user) => logAudit(entry, user),
       });
       return;
     }
@@ -183,7 +183,7 @@ client.on('interactionCreate', async (interaction: Interaction) => {
           }
         },
         getState: (messageId) => messageStates.get(messageId) ?? null,
-        logAudit: (action, user) => logAudit(action, user),
+        logAudit: (entry, user) => logAudit(entry, user),
       }, parsedView);
       return;
     }
@@ -198,7 +198,7 @@ client.on('interactionCreate', async (interaction: Interaction) => {
           }
         },
         getState: (messageId) => messageStates.get(messageId) ?? null,
-        logAudit: (action, user) => logAudit(action, user),
+        logAudit: (entry, user) => logAudit(entry, user),
       });
       return;
     }
@@ -210,7 +210,7 @@ client.on('interactionCreate', async (interaction: Interaction) => {
         servers,
         adminRoleId,
         getState: (messageId) => messageStates.get(messageId) ?? null,
-        logAudit: (action, user) => logAudit(action, user),
+        logAudit: (entry, user) => logAudit(entry, user),
       }, parsedAction);
       return;
     }
@@ -222,7 +222,7 @@ client.on('interactionCreate', async (interaction: Interaction) => {
         servers,
         adminRoleId,
         getState: (messageId) => messageStates.get(messageId) ?? null,
-        logAudit: (action, user) => logAudit(action, user),
+        logAudit: (entry, user) => logAudit(entry, user),
       }, parsedConfirmation);
       return;
     }

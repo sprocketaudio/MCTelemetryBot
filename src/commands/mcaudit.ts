@@ -10,11 +10,12 @@ import {
 import { isAdmin } from '../utils/permissions';
 import { sendTemporaryReply } from '../utils/messages';
 import { AuditConfig, saveAuditConfig } from '../services/auditStore';
+import { AuditLogEntry } from '../services/auditLogger';
 
 export interface AuditContext {
   adminRoleId?: string;
   onConfigured?: (config: AuditConfig) => Promise<void> | void;
-  logAudit?: (action: string, user: User) => Promise<void> | void;
+  logAudit?: (entry: AuditLogEntry, user: User) => Promise<void> | void;
 }
 
 const SUPPORTED_CHANNELS = [ChannelType.GuildText, ChannelType.GuildAnnouncement] as const;
@@ -62,5 +63,8 @@ export async function executeMcAudit(
     interaction,
     `Audit channel set to ${selectedChannel.name} (${selectedChannel.toString()}).`
   );
-  context.logAudit?.(`set the audit channel to ${selectedChannel.toString()}`, interaction.user);
+  context.logAudit?.(
+    { action: `Set the audit channel to ${selectedChannel.toString()}.`, emoji: '📢', style: 'primary' },
+    interaction.user
+  );
 }

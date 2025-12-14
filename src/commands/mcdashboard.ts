@@ -15,12 +15,13 @@ import { isAdmin } from '../utils/permissions';
 import { logger } from '../utils/logger';
 import { ServerConfig } from '../config/servers';
 import { editReplyWithExpiry, sendTemporaryReply } from '../utils/messages';
+import { AuditLogEntry } from '../services/auditLogger';
 
 export interface DashboardContext {
   servers: ServerConfig[];
   adminRoleId?: string;
   onConfigured?: (config: DashboardConfig) => Promise<void> | void;
-  logAudit?: (action: string, user: User) => Promise<void> | void;
+  logAudit?: (entry: AuditLogEntry, user: User) => Promise<void> | void;
 }
 
 const SUPPORTED_CHANNELS = [ChannelType.GuildText, ChannelType.GuildAnnouncement] as const;
@@ -111,5 +112,8 @@ export async function executeMcDashboard(
   }
 
   await editReplyWithExpiry(interaction, 'Dashboard configured');
-  context.logAudit?.(`configured dashboard in ${selectedChannel.toString()}`, interaction.user);
+  context.logAudit?.(
+    { action: `Configured dashboard in ${selectedChannel.toString()}.`, emoji: '🛠️', style: 'primary' },
+    interaction.user
+  );
 }
