@@ -225,12 +225,12 @@ interface ActionConfirmation {
 
 const buildConfirmationPhrase = (
   action: Extract<StatusAction, 'restart' | 'stop' | 'kill'>,
-  serverName: string
+  serverId: string
 ): string => {
-  const name = serverName.toLowerCase();
-  if (action === 'restart') return `restart ${name}`;
-  if (action === 'stop') return `stop ${name}`;
-  return `kill ${name} yes`;
+  const id = serverId.toLowerCase();
+  if (action === 'restart') return `restart ${id}`;
+  if (action === 'stop') return `stop ${id}`;
+  return `kill ${id} yes`;
 };
 
 const normalizeConfirmationValue = (value: string): string =>
@@ -299,17 +299,16 @@ const buildConfirmationModal = (
   serverId: string,
   serverName: string
 ) => {
-  const phrase = buildConfirmationPhrase(action, serverName);
-  const actionLabel = action.toLowerCase();
+  const phrase = buildConfirmationPhrase(action, serverId);
 
   return new ModalBuilder()
     .setCustomId(`${MCSTATUS_CONFIRM_CUSTOM_ID_PREFIX}:${action}:${messageId}:${serverId}`)
-    .setTitle(`confirm ${actionLabel} — ${serverName}`)
+    .setTitle(`Confirm ${action.toUpperCase()} - ${serverName}`)
     .addComponents(
       new ActionRowBuilder<TextInputBuilder>().addComponents(
         new TextInputBuilder()
           .setCustomId('confirm_action')
-          .setLabel('type the exact phrase below')
+          .setLabel('Type the EXACT phrase below')
           .setStyle(TextInputStyle.Short)
           .setRequired(true)
           .setPlaceholder(phrase)
@@ -431,7 +430,7 @@ export async function handleMcStatusActionConfirm(
     return;
   }
 
-  const expectedPhrase = buildConfirmationPhrase(parsed.action, targetServer.name);
+  const expectedPhrase = buildConfirmationPhrase(parsed.action, parsed.serverId);
   const confirmation = interaction.fields.getTextInputValue('confirm_action') ?? '';
 
   if (normalizeConfirmationValue(confirmation) !== normalizeConfirmationValue(expectedPhrase)) {
