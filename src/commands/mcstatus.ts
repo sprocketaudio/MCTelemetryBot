@@ -46,11 +46,17 @@ export async function executeMcStatus(
 
   const statuses = await fetchServerStatuses(context.servers);
   const state = buildDefaultState();
-  const embeds = buildStatusEmbeds(context.servers, statuses, new Date(), state.view, state.selectedServerId);
+  const embeds = buildStatusEmbeds(
+    context.servers,
+    statuses,
+    new Date(),
+    state.serverViews,
+    state.selectedServerId
+  );
 
   const message = await interaction.editReply({
     embeds,
-    components: buildViewComponents(context.servers, state.view, state.selectedServerId),
+    components: buildViewComponents(context.servers, state.selectedServerId, state.serverViews),
   });
 
   if (context.onStateChange) {
@@ -79,7 +85,15 @@ export async function handleMcStatusView(
   await interaction.deferUpdate();
 
   const currentState = resolveState(interaction, context);
-  currentState.view = view;
+  if (!currentState.selectedServerId) {
+    await interaction.editReply({
+      components: buildViewComponents(context.servers, currentState.selectedServerId, currentState.serverViews),
+    });
+    await interaction.followUp({ content: 'Select a server first.', ephemeral: true });
+    return;
+  }
+
+  currentState.serverViews[currentState.selectedServerId] = view;
 
   if (context.onStateChange) {
     context.onStateChange(currentState, interaction.message.id);
@@ -90,13 +104,13 @@ export async function handleMcStatusView(
     context.servers,
     statuses,
     new Date(),
-    currentState.view,
+    currentState.serverViews,
     currentState.selectedServerId
   );
 
   await interaction.editReply({
     embeds,
-    components: buildViewComponents(context.servers, currentState.view, currentState.selectedServerId),
+    components: buildViewComponents(context.servers, currentState.selectedServerId, currentState.serverViews),
   });
 }
 
@@ -118,6 +132,9 @@ export async function handleMcStatusSelect(
   const selectedServer = context.servers.find((server) => server.id === selectedId) ?? null;
   const currentState = resolveState(interaction, context);
   currentState.selectedServerId = selectedServer ? selectedServer.id : null;
+  if (currentState.selectedServerId && !currentState.serverViews[currentState.selectedServerId]) {
+    currentState.serverViews[currentState.selectedServerId] = 'status';
+  }
 
   if (context.onStateChange) {
     context.onStateChange(currentState, interaction.message.id);
@@ -128,13 +145,13 @@ export async function handleMcStatusSelect(
     context.servers,
     statuses,
     new Date(),
-    currentState.view,
+    currentState.serverViews,
     currentState.selectedServerId
   );
 
   await interaction.editReply({
     embeds,
-    components: buildViewComponents(context.servers, currentState.view, currentState.selectedServerId),
+    components: buildViewComponents(context.servers, currentState.selectedServerId, currentState.serverViews),
   });
 }
 

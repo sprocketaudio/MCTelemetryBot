@@ -30,15 +30,21 @@ export type StatusView = 'status' | 'players';
 
 export interface DashboardState {
   selectedServerId: string | null;
-  view: StatusView;
+  serverViews: Record<string, StatusView>;
 }
 
 const VIEW_CUSTOM_ID_REGEX = new RegExp(`^${MCSTATUS_VIEW_CUSTOM_ID_PREFIX}:(status|players)$`);
 
 export const buildDefaultState = (defaultView: StatusView = 'status'): DashboardState => ({
   selectedServerId: null,
-  view: defaultView,
+  serverViews: {},
 });
+
+export const getServerView = (
+  serverId: string,
+  state: DashboardState,
+  defaultView: StatusView = 'status'
+): StatusView => state.serverViews[serverId] ?? defaultView;
 
 export const parseViewButton = (customId: string): StatusView | null => {
   const match = customId.match(VIEW_CUSTOM_ID_REGEX);
@@ -211,8 +217,9 @@ export const buildStatusEmbeds = (
   servers: ServerConfig[],
   statuses: Map<string, ServerStatus>,
   lastUpdated: Date,
-  view: StatusView,
-  selectedServerId: string | null
+  serverViews: Record<string, StatusView>,
+  selectedServerId: string | null,
+  defaultView: StatusView = 'status'
 ) => {
   const leftWidth = 16;
   const embeds: EmbedBuilder[] = [];
@@ -224,6 +231,7 @@ export const buildStatusEmbeds = (
     const telemetry = status?.telemetry;
     const pterodactyl = status?.pterodactyl;
 
+    const view = getServerView(server.id, { selectedServerId, serverViews }, defaultView);
     const description =
       view === 'status'
         ? formatStatusLines(telemetry, pterodactyl, status?.telemetryError, leftWidth)
@@ -233,10 +241,12 @@ export const buildStatusEmbeds = (
     const prefix = server.id === selectedId ? '▶ ' : '';
     const title = `${prefix}${name}  ${formatStatus(pterodactyl?.currentState)}`;
 
+    const embedColor = server.id === selectedId ? 0x00c6ff : 0x2b1645;
+
     embeds.push(
       new EmbedBuilder()
         .setTitle(title)
-        .setColor(0x2d3136)
+        .setColor(embedColor)
         .setDescription(description)
         .setFooter({ text: `Last update: ${formatFooterDate(lastUpdated)} UTC` })
     );
@@ -247,10 +257,12 @@ export const buildStatusEmbeds = (
 
 export function buildViewComponents(
   servers: ServerConfig[],
-  view: StatusView,
-  selectedServerId: string | null
+  selectedServerId: string | null,
+  serverViews: Record<string, StatusView>,
+  defaultView: StatusView = 'status'
 ): ActionRowBuilder<MessageActionRowComponentBuilder>[] {
   const selectedId = servers.some((server) => server.id === selectedServerId) ? selectedServerId : null;
+  const activeView = selectedId ? getServerView(selectedId, { selectedServerId, serverViews }, defaultView) : defaultView;
 
   const selectMenu = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
     new StringSelectMenuBuilder()
@@ -271,12 +283,12 @@ export function buildViewComponents(
       .setCustomId(`${MCSTATUS_VIEW_CUSTOM_ID_PREFIX}:status`)
       .setLabel('Status')
       .setStyle(ButtonStyle.Primary)
-      .setDisabled(view === 'status'),
+      .setDisabled(!selectedId || activeView === 'status'),
     new ButtonBuilder()
       .setCustomId(`${MCSTATUS_VIEW_CUSTOM_ID_PREFIX}:players`)
       .setLabel('Players')
       .setStyle(ButtonStyle.Primary)
-      .setDisabled(view === 'players')
+      .setDisabled(!selectedId || activeView === 'players')
   );
 
   const actionButtons = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
@@ -307,9 +319,10 @@ export function buildViewComponents(
 
 export const getDashboardStateFromMessage = (
   message: Message,
-  servers: ServerConfig[]
+  servers: ServerConfig[],
+  defaultView: StatusView = 'status'
 ): DashboardState => {
-  const state = buildDefaultState();
+  const state = buildDefaultState(defaultView);
   const validIds = new Set(servers.map((server) => server.id));
 
   for (const row of message.components) {
@@ -329,8 +342,8 @@ export const getDashboardStateFromMessage = (
       const parsedView = parseViewButton(component.customId);
       if (parsedView) {
         const isDisabled = (component as { disabled?: boolean }).disabled;
-        if (isDisabled || !state.view) {
-          state.view = parsedView;
+        if (isDisabled && state.selectedServerId) {
+          state.serverViews[state.selectedServerId] = parsedView;
         }
       }
     }
@@ -338,6 +351,10 @@ export const getDashboardStateFromMessage = (
 
   if (state.selectedServerId && !validIds.has(state.selectedServerId)) {
     state.selectedServerId = null;
+  }
+
+  if (state.selectedServerId && !state.serverViews[state.selectedServerId]) {
+    state.serverViews[state.selectedServerId] = defaultView;
   }
 
   return state;

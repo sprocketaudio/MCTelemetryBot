@@ -67,8 +67,14 @@ export async function executeMcDashboard(
 
   const statuses = await fetchServerStatuses(context.servers, { forceRefresh: true });
   const state = buildDefaultState();
-  const embeds = buildStatusEmbeds(context.servers, statuses, new Date(), state.view, state.selectedServerId);
-  const components = buildViewComponents(context.servers, state.view, state.selectedServerId);
+  const embeds = buildStatusEmbeds(
+    context.servers,
+    statuses,
+    new Date(),
+    state.serverViews,
+    state.selectedServerId
+  );
+  const components = buildViewComponents(context.servers, state.selectedServerId, state.serverViews);
 
   const existingConfig = loadDashboardConfig();
   let targetMessage: Message<true> | null = null;

@@ -68,23 +68,23 @@ async function refreshDashboard(options: { forceRefresh?: boolean } = {}) {
     const textChannel = channel as TextBasedChannel;
     const message = await textChannel.messages.fetch(dashboardConfig.messageId);
 
-    const statuses = await fetchServerStatuses(servers, options);
-    const currentState = messageStates.get(message.id) ?? getDashboardStateFromMessage(message, servers);
-    if (!servers.some((server) => server.id === currentState.selectedServerId)) {
-      currentState.selectedServerId = null;
-    }
+  const statuses = await fetchServerStatuses(servers, options);
+  const currentState = messageStates.get(message.id) ?? getDashboardStateFromMessage(message, servers);
+  if (!servers.some((server) => server.id === currentState.selectedServerId)) {
+    currentState.selectedServerId = null;
+  }
     messageStates.set(message.id, currentState);
     const embeds = buildStatusEmbeds(
       servers,
       statuses,
       new Date(),
-      currentState.view,
+      currentState.serverViews,
       currentState.selectedServerId
     );
 
     await message.edit({
       embeds,
-      components: buildViewComponents(servers, currentState.view, currentState.selectedServerId),
+      components: buildViewComponents(servers, currentState.selectedServerId, currentState.serverViews),
     });
   } catch (error) {
     logger.warn('Dashboard refresh failed; disabling auto-refresh until reconfigured.', error);
