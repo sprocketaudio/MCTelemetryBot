@@ -1,4 +1,4 @@
-# MCTelementryBot
+# MCTelemetryBot
 
 A Discord bot for monitoring Minecraft servers via MCTelemetry endpoints and Pterodactyl health data. It provides a `/mcstatus` slash command with a refresh button plus an auto-refreshing dashboard you can pin to a channel.
 
