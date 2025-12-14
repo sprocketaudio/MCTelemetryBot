@@ -138,7 +138,9 @@ const formatUsage = (used?: number, limit?: number) => {
 const isHot = (percent?: number) => percent !== undefined && percent > 90;
 
 const formatResources = (resources?: PterodactylResources) => {
-  const cpuPercent = toNumberOrUndefined(resources?.cpuAbsolute);
+  const cpuPercent = resources?.cpuLimitPercent
+    ? calculatePercent(resources.cpuAbsolute, resources.cpuLimitPercent)
+    : toNumberOrUndefined(resources?.cpuAbsolute);
   const memPercent = calculatePercent(resources?.memoryBytes, resources?.memoryLimitBytes);
   const diskPercent = calculatePercent(resources?.diskBytes, resources?.diskLimitBytes);
 

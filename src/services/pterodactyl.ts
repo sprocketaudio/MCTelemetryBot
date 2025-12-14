@@ -4,6 +4,7 @@ import { logger } from '../utils/logger';
 export interface PterodactylResources {
   currentState?: string;
   cpuAbsolute?: number;
+  cpuLimitPercent?: number;
   memoryBytes?: number;
   memoryLimitBytes?: number;
   diskBytes?: number;
@@ -11,6 +12,12 @@ export interface PterodactylResources {
   networkRxBytes?: number;
   networkTxBytes?: number;
   uptimeMs?: number;
+}
+
+interface PterodactylLimits {
+  cpuLimitPercent?: number;
+  memoryLimitBytes?: number;
+  diskLimitBytes?: number;
 }
 
 interface CacheEntry {
@@ -21,6 +28,8 @@ interface CacheEntry {
 const CACHE_TTL_MS = 10_000;
 const REQUEST_TIMEOUT_MS = 2_000;
 const cache = new Map<string, CacheEntry>();
+const lastKnownStates = new Map<string, string | undefined>();
+const runningSince = new Map<string, number>();
 
 const getEnv = () => {
   const panelUrl = process.env.PTERO_PANEL_URL;
@@ -33,7 +42,7 @@ const getEnv = () => {
   return { panelUrl: panelUrl.replace(/\/$/, ''), token };
 };
 
-const validateAndParse = (payload: unknown): PterodactylResources => {
+const validateAndParseResources = (payload: unknown): PterodactylResources => {
   if (!payload || typeof payload !== 'object') {
     throw new Error('Invalid Pterodactyl payload');
   }
@@ -58,25 +67,29 @@ const validateAndParse = (payload: unknown): PterodactylResources => {
   };
 };
 
-export async function fetchPterodactylResources(
-  server: ServerConfig,
-  options: { forceRefresh?: boolean } = {}
-): Promise<PterodactylResources> {
-  if (!server.pteroIdentifier) {
-    throw new Error(`Server ${server.name} is missing pteroIdentifier.`);
+const validateAndParseLimits = (payload: unknown): PterodactylLimits => {
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('Invalid Pterodactyl limits payload');
   }
 
-  const cached = cache.get(server.id);
-  const now = Date.now();
-  if (!options.forceRefresh && cached && now - cached.timestamp < CACHE_TTL_MS) {
-    logger.debug(`Serving cached Pterodactyl resources for ${server.name}`);
-    return cached.data;
+  const attributes = (payload as any).attributes;
+  if (!attributes || typeof attributes !== 'object') {
+    throw new Error('Invalid Pterodactyl limits payload attributes');
   }
 
-  const { panelUrl, token } = getEnv();
+  const limits = attributes.limits ?? {};
+  const toBytes = (value: unknown) => (value === undefined ? undefined : Number(value) * 1024 * 1024);
+
+  return {
+    cpuLimitPercent: limits.cpu !== undefined ? Number(limits.cpu) : undefined,
+    memoryLimitBytes: toBytes(limits.memory),
+    diskLimitBytes: toBytes(limits.disk),
+  };
+};
+
+const withTimeout = async (url: string, token: string) => {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  const url = `${panelUrl}/api/client/servers/${server.pteroIdentifier}/resources`;
 
   try {
     const response = await fetch(url, {
@@ -92,13 +105,73 @@ export async function fetchPterodactylResources(
       throw new Error(`HTTP ${response.status}`);
     }
 
-    const payload = (await response.json()) as unknown;
-    const data = validateAndParse(payload);
-    cache.set(server.id, { data, timestamp: now });
-    return data;
+    return (await response.json()) as unknown;
   } finally {
     clearTimeout(timeout);
   }
+};
+
+const calculateUptime = (
+  serverId: string,
+  currentState?: string,
+  reportedUptimeMs?: number
+): number | undefined => {
+  const previousState = lastKnownStates.get(serverId);
+  lastKnownStates.set(serverId, currentState);
+
+  if (currentState !== 'running') {
+    runningSince.delete(serverId);
+    return undefined;
+  }
+
+  if (!runningSince.has(serverId) || previousState !== 'running') {
+    const startedAt = Date.now() - (reportedUptimeMs ?? 0);
+    runningSince.set(serverId, startedAt);
+  }
+
+  const start = runningSince.get(serverId);
+  return start !== undefined ? Date.now() - start : reportedUptimeMs;
+};
+
+export async function fetchPterodactylResources(
+  server: ServerConfig,
+  options: { forceRefresh?: boolean } = {}
+): Promise<PterodactylResources> {
+  if (!server.pteroIdentifier) {
+    throw new Error(`Server ${server.name} is missing pteroIdentifier.`);
+  }
+
+  const cached = cache.get(server.id);
+  const now = Date.now();
+  if (!options.forceRefresh && cached && now - cached.timestamp < CACHE_TTL_MS) {
+    logger.debug(`Serving cached Pterodactyl resources for ${server.name}`);
+    const uptimeMs = calculateUptime(server.id, cached.data.currentState, cached.data.uptimeMs);
+    return { ...cached.data, uptimeMs };
+  }
+
+  const { panelUrl, token } = getEnv();
+  const resourcesUrl = `${panelUrl}/api/client/servers/${server.pteroIdentifier}/resources`;
+  const limitsUrl = `${panelUrl}/api/client/servers/${server.pteroIdentifier}`;
+
+  const [resourcesPayload, limitsPayload] = await Promise.all([
+    withTimeout(resourcesUrl, token),
+    withTimeout(limitsUrl, token),
+  ]);
+
+  const parsedResources = validateAndParseResources(resourcesPayload);
+  const parsedLimits = validateAndParseLimits(limitsPayload);
+
+  const data: PterodactylResources = {
+    ...parsedResources,
+    cpuLimitPercent: parsedLimits.cpuLimitPercent ?? parsedResources.cpuLimitPercent,
+    memoryLimitBytes: parsedLimits.memoryLimitBytes ?? parsedResources.memoryLimitBytes,
+    diskLimitBytes: parsedLimits.diskLimitBytes ?? parsedResources.diskLimitBytes,
+  };
+
+  data.uptimeMs = calculateUptime(server.id, data.currentState, data.uptimeMs);
+
+  cache.set(server.id, { data, timestamp: now });
+  return data;
 }
 
 export function clearPterodactylCache(): void {
