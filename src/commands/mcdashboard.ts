@@ -1,6 +1,7 @@
 import {
   ChannelType,
   ChatInputCommandInteraction,
+  Message,
   PermissionFlagsBits,
   SlashCommandBuilder,
   SlashCommandChannelOption,
@@ -69,7 +70,7 @@ export async function executeMcDashboard(
   const components = buildViewComponents('status');
 
   const existingConfig = loadDashboardConfig();
-  let targetMessage;
+  let targetMessage: Message<true> | null = null;
 
   if (existingConfig && existingConfig.guildId === interaction.guildId) {
     try {
@@ -81,6 +82,7 @@ export async function executeMcDashboard(
       }
     } catch (error) {
       logger.warn('Existing dashboard message could not be updated, creating a new one.', error);
+      targetMessage = null;
     }
   }
 

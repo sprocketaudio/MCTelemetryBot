@@ -134,12 +134,11 @@ const formatResources = (resources?: PterodactylResources) => {
   const memText = `${memIcon} RAM ${formatPercent(memPercent)}`;
   const diskText = `${diskIcon} Disk ${formatPercent(diskPercent)}`;
   const uptimeText = resources?.uptimeMs !== undefined ? `⏱ Uptime ${formatUptime(resources?.uptimeMs)}` : null;
-  const lines = [cpuText, memText, diskText];
-  if (uptimeText) {
-    lines.push(uptimeText);
-  }
 
-  return lines;
+  const cpuRamLine = [cpuText, memText].filter(Boolean).join(' | ');
+  const diskUptimeLine = [diskText, uptimeText].filter(Boolean).join(' | ');
+
+  return [cpuRamLine, diskUptimeLine];
 };
 
 const formatStatusLines = (
@@ -147,12 +146,7 @@ const formatStatusLines = (
   resources?: PterodactylResources,
   telemetryError?: Error
 ) => {
-  const lines = [
-    '',
-    formatStatus(resources?.currentState),
-    formatPlayerSummary(telemetry, telemetryError),
-    formatTpsMspt(telemetry),
-  ];
+  const lines = [formatPlayerSummary(telemetry, telemetryError), formatTpsMspt(telemetry)];
 
   const resourceLines = formatResources(resources);
   if (resourceLines.length > 0) {
@@ -193,7 +187,8 @@ export const buildStatusEmbed = (
         : formatPlayerLines(telemetry, status?.telemetryError);
 
     const name = server.pteroName ?? server.name;
-    embed.addFields({ name, value });
+    const statusLabel = formatStatus(pterodactyl?.currentState);
+    embed.addFields({ name: `${name} ${statusLabel}\n`, value });
   });
 
   embed.setFooter({ text: `Last update: ${formatFooterDate(lastUpdated)} UTC` });
