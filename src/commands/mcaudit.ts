@@ -7,13 +7,12 @@ import {
   SlashCommandChannelOption,
   User,
 } from 'discord.js';
-import { isAdmin } from '../utils/permissions';
+import { isAdministrator } from '../utils/permissions';
 import { sendTemporaryReply } from '../utils/messages';
 import { AuditConfig, saveAuditConfig } from '../services/auditStore';
 import { AuditLogEntry } from '../services/auditLogger';
 
 export interface AuditContext {
-  adminRoleId?: string;
   onConfigured?: (config: AuditConfig) => Promise<void> | void;
   logAudit?: (entry: AuditLogEntry, user: User) => Promise<void> | void;
 }
@@ -36,7 +35,7 @@ export async function executeMcAudit(
   interaction: ChatInputCommandInteraction,
   context: AuditContext
 ): Promise<void> {
-  if (!isAdmin(interaction, context.adminRoleId)) {
+  if (!isAdministrator(interaction)) {
     await sendTemporaryReply(interaction, 'You need Administrator permissions to use this command.');
     return;
   }

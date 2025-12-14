@@ -11,7 +11,7 @@ import {
 } from 'discord.js';
 import { DashboardConfig, loadDashboardConfig, saveDashboardConfig } from '../services/dashboardStore';
 import { buildDefaultState, buildStatusEmbeds, buildViewComponents, fetchServerStatuses } from '../services/status';
-import { isAdmin } from '../utils/permissions';
+import { isAdministrator } from '../utils/permissions';
 import { logger } from '../utils/logger';
 import { ServerConfig } from '../config/servers';
 import { editReplyWithExpiry, sendTemporaryReply } from '../utils/messages';
@@ -19,7 +19,7 @@ import { AuditLogEntry } from '../services/auditLogger';
 
 export interface DashboardContext {
   servers: ServerConfig[];
-  adminRoleId?: string;
+  resolvePteroToken?: (userId?: string) => string | null;
   onConfigured?: (config: DashboardConfig) => Promise<void> | void;
   logAudit?: (entry: AuditLogEntry, user: User) => Promise<void> | void;
 }
@@ -46,7 +46,7 @@ export async function executeMcDashboard(
   interaction: ChatInputCommandInteraction,
   context: DashboardContext
 ): Promise<void> {
-  if (!isAdmin(interaction, context.adminRoleId)) {
+  if (!isAdministrator(interaction)) {
     await sendTemporaryReply(interaction, 'You need Administrator permissions to use this command.');
     return;
   }
@@ -63,7 +63,11 @@ export async function executeMcDashboard(
 
   await interaction.deferReply();
 
-  const statuses = await fetchServerStatuses(context.servers, { forceRefresh: true });
+  const statuses = await fetchServerStatuses(context.servers, {
+    forceRefresh: true,
+    pterodactylToken: context.resolvePteroToken?.(interaction.user.id),
+    tokenOwnerId: interaction.user.id,
+  });
   const state = buildDefaultState();
   const embeds = buildStatusEmbeds(
     context.servers,
@@ -104,6 +108,7 @@ export async function executeMcDashboard(
     guildId: interaction.guildId ?? '',
     channelId: targetMessage.channelId,
     messageId: targetMessage.id,
+    configuredByUserId: interaction.user.id,
   };
 
   saveDashboardConfig(config);

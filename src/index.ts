@@ -21,6 +21,7 @@ import {
 import { loadServers } from './config/servers';
 import { loadDashboardConfig, DashboardConfig } from './services/dashboardStore';
 import { AuditConfig, loadAuditConfig } from './services/auditStore';
+import { loadPterodactylUserTokens } from './config/pterodactylUsers';
 import {
   DashboardState,
   buildDefaultState,
@@ -37,7 +38,8 @@ import { sendTemporaryReply } from './utils/messages';
 const token = process.env.DISCORD_TOKEN;
 const clientId = process.env.DISCORD_CLIENT_ID;
 const guildId = process.env.DISCORD_GUILD_ID;
-const adminRoleId = process.env.ADMIN_ROLE_ID;
+const modRoleId = process.env.MOD_ROLE_ID;
+const defaultPterodactylToken = process.env.PTERO_CLIENT_TOKEN ?? null;
 
 if (!token || !clientId || !guildId) {
   throw new Error('DISCORD_TOKEN, DISCORD_CLIENT_ID, and DISCORD_GUILD_ID must be set.');
@@ -50,8 +52,18 @@ const resolvedGuildId = guildId!;
 const servers = loadServers();
 let dashboardConfig: DashboardConfig | null = loadDashboardConfig();
 let auditConfig: AuditConfig | null = loadAuditConfig();
+const pterodactylTokens = loadPterodactylUserTokens();
 let dashboardInterval: NodeJS.Timeout | null = null;
 const messageStates = new Map<string, DashboardState>();
+
+const resolvePteroToken = (userId?: string | null): string | null => {
+  if (userId) {
+    const userToken = pterodactylTokens.get(userId);
+    if (userToken) return userToken;
+  }
+
+  return defaultPterodactylToken;
+};
 
 const logAudit = async (entry: AuditLogEntry, user: User) => {
   await sendAuditLog(client, auditConfig, entry, user);
@@ -80,7 +92,12 @@ async function refreshDashboard(options: { forceRefresh?: boolean } = {}) {
     const textChannel = channel as TextBasedChannel;
     const message = await textChannel.messages.fetch(dashboardConfig.messageId);
 
-    const statuses = await fetchServerStatuses(servers, options);
+    const pteroToken = resolvePteroToken(dashboardConfig.configuredByUserId);
+    const statuses = await fetchServerStatuses(servers, {
+      ...options,
+      pterodactylToken: pteroToken,
+      tokenOwnerId: dashboardConfig.configuredByUserId,
+    });
     const currentState = messageStates.get(message.id) ?? getDashboardStateFromMessage(message, servers);
     if (!servers.some((server) => server.id === currentState.selectedServerId)) {
       currentState.selectedServerId = null;
@@ -134,7 +151,8 @@ client.on('interactionCreate', async (interaction: Interaction) => {
     if (interaction.isChatInputCommand() && interaction.commandName === mcStatusCommand.name) {
       await executeMcStatus(interaction, {
         servers,
-        adminRoleId,
+        modRoleId,
+        resolvePteroToken,
         onStateChange: (state, messageId) => {
           if (messageId) {
             messageStates.set(messageId, state);
@@ -149,7 +167,7 @@ client.on('interactionCreate', async (interaction: Interaction) => {
     if (interaction.isChatInputCommand() && interaction.commandName === mcDashboardCommand.name) {
       await executeMcDashboard(interaction, {
         servers,
-        adminRoleId,
+        resolvePteroToken,
         onConfigured: (config) => {
           dashboardConfig = config;
           messageStates.set(config.messageId, buildDefaultState());
@@ -162,7 +180,6 @@ client.on('interactionCreate', async (interaction: Interaction) => {
 
     if (interaction.isChatInputCommand() && interaction.commandName === mcAuditCommand.name) {
       await executeMcAudit(interaction, {
-        adminRoleId,
         onConfigured: (config) => {
           auditConfig = config;
         },
@@ -176,7 +193,8 @@ client.on('interactionCreate', async (interaction: Interaction) => {
       if (!parsedView) return;
       await handleMcStatusView(interaction, {
         servers,
-        adminRoleId,
+        modRoleId,
+        resolvePteroToken,
         onStateChange: (state, messageId) => {
           if (messageId) {
             messageStates.set(messageId, state);
@@ -191,7 +209,8 @@ client.on('interactionCreate', async (interaction: Interaction) => {
     if (interaction.isStringSelectMenu() && interaction.customId === MCSTATUS_SELECT_CUSTOM_ID) {
       await handleMcStatusSelect(interaction, {
         servers,
-        adminRoleId,
+        modRoleId,
+        resolvePteroToken,
         onStateChange: (state, messageId) => {
           if (messageId) {
             messageStates.set(messageId, state);
@@ -208,7 +227,8 @@ client.on('interactionCreate', async (interaction: Interaction) => {
       if (!parsedAction) return;
       await handleMcStatusAction(interaction, {
         servers,
-        adminRoleId,
+        modRoleId,
+        resolvePteroToken,
         getState: (messageId) => messageStates.get(messageId) ?? null,
         logAudit: (entry, user) => logAudit(entry, user),
       }, parsedAction);
@@ -220,7 +240,8 @@ client.on('interactionCreate', async (interaction: Interaction) => {
       if (!parsedConfirmation) return;
       await handleMcStatusActionConfirm(interaction, {
         servers,
-        adminRoleId,
+        modRoleId,
+        resolvePteroToken,
         getState: (messageId) => messageStates.get(messageId) ?? null,
         logAudit: (entry, user) => logAudit(entry, user),
       }, parsedConfirmation);

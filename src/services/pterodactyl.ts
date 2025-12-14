@@ -33,15 +33,13 @@ const runningSince = new Map<string, number>();
 
 export type PowerSignal = 'start' | 'restart' | 'stop' | 'kill';
 
-const getEnv = () => {
+const getPanelUrl = () => {
   const panelUrl = process.env.PTERO_PANEL_URL;
-  const token = process.env.PTERO_CLIENT_TOKEN;
-
-  if (!panelUrl || !token) {
-    throw new Error('PTERO_PANEL_URL and PTERO_CLIENT_TOKEN must be set to fetch server health.');
+  if (!panelUrl) {
+    throw new Error('PTERO_PANEL_URL must be set to fetch server health.');
   }
 
-  return { panelUrl: panelUrl.replace(/\/$/, ''), token };
+  return panelUrl.replace(/\/$/, '');
 };
 
 const validateAndParseResources = (payload: unknown): PterodactylResources => {
@@ -151,13 +149,14 @@ const calculateUptime = (
 
 export async function fetchPterodactylResources(
   server: ServerConfig,
-  options: { forceRefresh?: boolean } = {}
+  options: { forceRefresh?: boolean; token?: string; cacheKey?: string } = {}
 ): Promise<PterodactylResources> {
   if (!server.pteroIdentifier) {
     throw new Error(`Server ${server.name} is missing pteroIdentifier.`);
   }
 
-  const cached = cache.get(server.id);
+  const cacheKey = `${options.cacheKey ?? 'default'}:${server.id}`;
+  const cached = cache.get(cacheKey);
   const now = Date.now();
   if (!options.forceRefresh && cached && now - cached.timestamp < CACHE_TTL_MS) {
     logger.debug(`Serving cached Pterodactyl resources for ${server.name}`);
@@ -165,7 +164,12 @@ export async function fetchPterodactylResources(
     return { ...cached.data, uptimeMs };
   }
 
-  const { panelUrl, token } = getEnv();
+  const token = options.token ?? process.env.PTERO_CLIENT_TOKEN;
+  if (!token) {
+    throw new Error('No Pterodactyl API token configured.');
+  }
+
+  const panelUrl = getPanelUrl();
   const resourcesUrl = `${panelUrl}/api/client/servers/${server.pteroIdentifier}/resources`;
   const limitsUrl = `${panelUrl}/api/client/servers/${server.pteroIdentifier}`;
 
@@ -186,17 +190,26 @@ export async function fetchPterodactylResources(
 
   data.uptimeMs = calculateUptime(server.id, data.currentState, data.uptimeMs);
 
-  cache.set(server.id, { data, timestamp: now });
+  cache.set(cacheKey, { data, timestamp: now });
   return data;
 }
 
 export const buildPanelConsoleUrl = (server: ServerConfig): string => {
-  const { panelUrl } = getEnv();
+  const panelUrl = getPanelUrl();
   return `${panelUrl}/server/${server.pteroIdentifier}`;
 };
 
-export async function sendPowerSignal(server: ServerConfig, signal: PowerSignal): Promise<void> {
-  const { panelUrl, token } = getEnv();
+export async function sendPowerSignal(
+  server: ServerConfig,
+  signal: PowerSignal,
+  options: { token?: string; tokenOwnerId?: string } = {}
+): Promise<void> {
+  const token = options.token ?? process.env.PTERO_CLIENT_TOKEN;
+  if (!token) {
+    throw new Error('No Pterodactyl API token configured.');
+  }
+
+  const panelUrl = getPanelUrl();
   const powerUrl = `${panelUrl}/api/client/servers/${server.pteroIdentifier}/power`;
 
   await withTimeout(powerUrl, token, {

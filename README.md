@@ -7,7 +7,8 @@ A Discord bot for monitoring Minecraft servers via MCTelemetry endpoints and Pte
 - `/mcdashboard` sets up an auto-refreshing dashboard message in a chosen channel.
 - Refresh button updates the same message without spamming channels.
 - Telemetry and Pterodactyl responses cached for 10 seconds to reduce load.
-- Administrator (or configured role) required to run the command or refresh.
+- Administrator required to run slash commands; a configured moderator role can use dashboard buttons.
+- Optional per-user Pterodactyl tokens ensure panel actions match each user's permissions.
 
 ## Prerequisites
 - Node.js 20+
@@ -45,12 +46,21 @@ A Discord bot for monitoring Minecraft servers via MCTelemetry endpoints and Pte
    DISCORD_TOKEN=your_bot_token
    DISCORD_CLIENT_ID=your_application_id
    DISCORD_GUILD_ID=your_dev_guild_id
-   # Optional: allow a specific role to use /mcstatus
-   ADMIN_ROLE_ID=role_id
+   # Optional: allow a specific role to use dashboard buttons
+   MOD_ROLE_ID=role_id
    PTERO_PANEL_URL=https://panel.example.com
-   PTERO_CLIENT_TOKEN=client_api_token
+   PTERO_CLIENT_TOKEN=client_api_token # default/fallback token
    ```
-6. (Optional) Pre-seed `dashboard.json` in the repo root if you already know the dashboard message info:
+6. (Optional) Provide user-specific Pterodactyl API tokens in `pterodactylTokens.json` in the project root (or
+   `./config/pterodactylTokens.json`). Each entry maps a Discord user ID to their own panel token:
+   ```json
+   [
+     { "userId": "123456789012345678", "token": "user_specific_client_token" }
+   ]
+   ```
+   These per-user tokens will be used for dashboard refreshes and control buttons triggered by that user, ensuring
+   panel permissions match their account. Interactions without a user-specific token will fall back to `PTERO_CLIENT_TOKEN`.
+7. (Optional) Pre-seed `dashboard.json` in the repo root if you already know the dashboard message info:
    ```json
    { "guildId": "123", "channelId": "456", "messageId": "789" }
    ```

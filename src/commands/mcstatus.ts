@@ -24,13 +24,14 @@ import {
 } from '../services/status';
 import { MCSTATUS_ACTION_CUSTOM_ID_PREFIX, MCSTATUS_CONFIRM_CUSTOM_ID_PREFIX } from '../config/constants';
 import { buildPanelConsoleUrl, sendPowerSignal } from '../services/pterodactyl';
-import { isAdmin } from '../utils/permissions';
+import { hasModRoleOrAdmin, isAdministrator } from '../utils/permissions';
 import { editReplyWithExpiry, sendTemporaryReply } from '../utils/messages';
 import { AuditLogEntry, AuditStyle } from '../services/auditLogger';
 
 export interface CommandContext {
   servers: ServerConfig[];
-  adminRoleId?: string;
+  modRoleId?: string;
+  resolvePteroToken?: (userId?: string) => string | null;
   onStateChange?: (state: DashboardState, messageId?: string) => void;
   getState?: (messageId: string) => DashboardState | null;
   logAudit?: (entry: AuditLogEntry, user: User) => Promise<void> | void;
@@ -45,14 +46,19 @@ export async function executeMcStatus(
   interaction: ChatInputCommandInteraction,
   context: CommandContext
 ): Promise<void> {
-  if (!isAdmin(interaction, context.adminRoleId)) {
+  if (!isAdministrator(interaction)) {
     await sendTemporaryReply(interaction, 'You need Administrator permissions to use this command.');
     return;
   }
 
   await interaction.deferReply();
 
-  const statuses = await fetchServerStatuses(context.servers);
+  const pteroToken = context.resolvePteroToken?.(interaction.user.id);
+
+  const statuses = await fetchServerStatuses(context.servers, {
+    pterodactylToken: pteroToken,
+    tokenOwnerId: interaction.user.id,
+  });
   const state = buildDefaultState();
   const embeds = buildStatusEmbeds(
     context.servers,
@@ -77,13 +83,24 @@ const resolveState = (interaction: ButtonInteraction | StringSelectMenuInteracti
   return context.getState?.(messageId) ?? getDashboardStateFromMessage(interaction.message, context.servers);
 };
 
+const resolvePteroTokenOrNotify = async (
+  interaction: ButtonInteraction | StringSelectMenuInteraction | ModalSubmitInteraction,
+  context: CommandContext
+): Promise<string | null> => {
+  const token = context.resolvePteroToken?.(interaction.user.id) ?? null;
+  if (token) return token;
+
+  await sendTemporaryReply(interaction, 'No Pterodactyl API token is configured for you.');
+  return null;
+};
+
 export async function handleMcStatusView(
   interaction: ButtonInteraction,
   context: CommandContext,
   view: StatusView
 ): Promise<void> {
-  if (!isAdmin(interaction, context.adminRoleId)) {
-    await sendTemporaryReply(interaction, 'You need Administrator permissions to refresh this status.');
+  if (!hasModRoleOrAdmin(interaction, context.modRoleId)) {
+    await sendTemporaryReply(interaction, 'You need Moderator permissions to refresh this status.');
     return;
   }
 
@@ -104,7 +121,13 @@ export async function handleMcStatusView(
     context.onStateChange(currentState, interaction.message.id);
   }
 
-  const statuses = await fetchServerStatuses(context.servers, { forceRefresh: true });
+  const pteroToken = context.resolvePteroToken?.(interaction.user.id);
+
+  const statuses = await fetchServerStatuses(context.servers, {
+    forceRefresh: true,
+    pterodactylToken: pteroToken,
+    tokenOwnerId: interaction.user.id,
+  });
   const embeds = buildStatusEmbeds(
     context.servers,
     statuses,
@@ -123,8 +146,8 @@ export async function handleMcStatusSelect(
   interaction: StringSelectMenuInteraction,
   context: CommandContext
 ): Promise<void> {
-  if (!isAdmin(interaction, context.adminRoleId)) {
-    await sendTemporaryReply(interaction, 'You need Administrator permissions to refresh this status.');
+  if (!hasModRoleOrAdmin(interaction, context.modRoleId)) {
+    await sendTemporaryReply(interaction, 'You need Moderator permissions to refresh this status.');
     return;
   }
 
@@ -142,7 +165,13 @@ export async function handleMcStatusSelect(
     context.onStateChange(currentState, interaction.message.id);
   }
 
-  const statuses = await fetchServerStatuses(context.servers, { forceRefresh: true });
+  const pteroToken = context.resolvePteroToken?.(interaction.user.id);
+
+  const statuses = await fetchServerStatuses(context.servers, {
+    forceRefresh: true,
+    pterodactylToken: pteroToken,
+    tokenOwnerId: interaction.user.id,
+  });
   const embeds = buildStatusEmbeds(
     context.servers,
     statuses,
@@ -223,9 +252,14 @@ const buildConfirmationModal = (
 const refreshDashboardMessage = async (
   message: Message,
   state: DashboardState,
-  context: CommandContext
+  context: CommandContext,
+  options: { pteroToken?: string | null; tokenOwnerId?: string } = {}
 ) => {
-  const statuses = await fetchServerStatuses(context.servers, { forceRefresh: true });
+  const statuses = await fetchServerStatuses(context.servers, {
+    forceRefresh: true,
+    pterodactylToken: options.pteroToken ?? undefined,
+    tokenOwnerId: options.tokenOwnerId,
+  });
   const embeds = buildStatusEmbeds(
     context.servers,
     statuses,
@@ -245,8 +279,8 @@ export async function handleMcStatusAction(
   context: CommandContext,
   action: StatusAction
 ): Promise<void> {
-  if (!isAdmin(interaction, context.adminRoleId)) {
-    await sendTemporaryReply(interaction, 'You need Administrator permissions to perform this action.');
+  if (!hasModRoleOrAdmin(interaction, context.modRoleId)) {
+    await sendTemporaryReply(interaction, 'You need Moderator permissions to perform this action.');
     return;
   }
 
@@ -269,6 +303,11 @@ export async function handleMcStatusAction(
     return;
   }
 
+  const pteroToken = await resolvePteroTokenOrNotify(interaction, context);
+  if (!pteroToken) {
+    return;
+  }
+
   if (action === 'restart' || action === 'stop') {
     const modal = buildConfirmationModal(action, interaction.message.id, targetServer.id, targetServer.name);
     await interaction.showModal(modal);
@@ -284,7 +323,7 @@ export async function handleMcStatusAction(
   if (action === 'start') {
     await interaction.deferReply();
     try {
-      await sendPowerSignal(targetServer, 'start');
+      await sendPowerSignal(targetServer, 'start', { token: pteroToken, tokenOwnerId: interaction.user.id });
       await editReplyWithExpiry(interaction, `Sent start command to **${targetServer.name}**.`);
       context.logAudit?.(buildActionAuditEntry('start', targetServer.name), interaction.user);
     } catch (error) {
@@ -295,7 +334,10 @@ export async function handleMcStatusAction(
       return;
     }
 
-    await refreshDashboardMessage(interaction.message, currentState, context);
+    await refreshDashboardMessage(interaction.message, currentState, context, {
+      pteroToken,
+      tokenOwnerId: interaction.user.id,
+    });
     return;
   }
 }
@@ -305,8 +347,8 @@ export async function handleMcStatusActionConfirm(
   context: CommandContext,
   parsed: ActionConfirmation
 ): Promise<void> {
-  if (!isAdmin(interaction, context.adminRoleId)) {
-    await sendTemporaryReply(interaction, 'You need Administrator permissions to perform this action.');
+  if (!hasModRoleOrAdmin(interaction, context.modRoleId)) {
+    await sendTemporaryReply(interaction, 'You need Moderator permissions to perform this action.');
     return;
   }
 
@@ -323,8 +365,15 @@ export async function handleMcStatusActionConfirm(
   }
 
   await interaction.deferReply();
+  const pteroToken = await resolvePteroTokenOrNotify(interaction, context);
+  if (!pteroToken) {
+    return;
+  }
   try {
-    await sendPowerSignal(targetServer, parsed.action);
+    await sendPowerSignal(targetServer, parsed.action, {
+      token: pteroToken,
+      tokenOwnerId: interaction.user.id,
+    });
     await editReplyWithExpiry(interaction, `Sent ${parsed.action} command to **${targetServer.name}**.`);
     context.logAudit?.(buildActionAuditEntry(parsed.action, targetServer.name), interaction.user);
   } catch (error) {
@@ -344,7 +393,10 @@ export async function handleMcStatusActionConfirm(
   if (interaction.channel && interaction.channel.isTextBased()) {
     const message = await interaction.channel.messages.fetch(parsed.messageId).catch(() => null);
     if (message) {
-      await refreshDashboardMessage(message, state, context);
+      await refreshDashboardMessage(message, state, context, {
+        pteroToken,
+        tokenOwnerId: interaction.user.id,
+      });
     }
   }
 }
