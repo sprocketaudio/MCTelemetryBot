@@ -6,6 +6,7 @@ export interface DashboardConfig {
   guildId: string;
   channelId: string;
   messageId: string;
+  configuredByUserId?: string;
 }
 
 const DASHBOARD_PATH = path.resolve('dashboard.json');

@@ -1,12 +1,18 @@
 import { GuildMemberRoleManager, PermissionFlagsBits } from 'discord.js';
 
-export const isAdmin = (interaction: { memberPermissions?: any; member?: any }, adminRoleId?: string) => {
-  const hasAdmin = interaction.memberPermissions?.has(PermissionFlagsBits.Administrator);
-  if (hasAdmin) return true;
+export const isAdministrator = (interaction: { memberPermissions?: any }) => {
+  return interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ?? false;
+};
 
-  if (adminRoleId && interaction.member && 'roles' in interaction.member) {
+export const hasModRoleOrAdmin = (
+  interaction: { memberPermissions?: any; member?: any },
+  modRoleId?: string
+) => {
+  if (isAdministrator(interaction)) return true;
+
+  if (modRoleId && interaction.member && 'roles' in interaction.member) {
     const roles = interaction.member.roles as GuildMemberRoleManager;
-    if (roles?.cache?.has(adminRoleId)) return true;
+    if (roles?.cache?.has(modRoleId)) return true;
   }
 
   return false;

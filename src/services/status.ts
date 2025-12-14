@@ -54,7 +54,7 @@ export const parseViewButton = (customId: string): StatusView | null => {
 
 export async function fetchServerStatuses(
   servers: ServerConfig[],
-  options: { forceRefresh?: boolean } = {}
+  options: { forceRefresh?: boolean; pterodactylToken?: string | null; tokenOwnerId?: string } = {}
 ): Promise<Map<string, ServerStatus>> {
   const result = new Map<string, ServerStatus>();
 
@@ -73,7 +73,11 @@ export async function fetchServerStatuses(
         });
 
       const pterodactylPromise = server.pteroIdentifier
-        ? fetchPterodactylResources(server, options)
+        ? fetchPterodactylResources(server, {
+            forceRefresh: options.forceRefresh,
+            token: options.pterodactylToken ?? undefined,
+            cacheKey: options.tokenOwnerId,
+          })
             .then((data) => {
               status.pterodactyl = data;
             })
