@@ -72,8 +72,8 @@ const formatPlayers = (telemetry?: TelemetryResponse, error?: Error) => {
   if (!telemetry) return '—';
   const players = telemetry.players ?? [];
   if (players.length === 0) return 'No players online';
-  const names = players.map((p) => p.name);
-  return `Online (${players.length}): ${names.join(', ')}`;
+  const names = players.map((p) => `- ${p.name}`);
+  return `Online (${players.length}):\n${names.join('\n')}`;
 };
 
 const formatPlayerSummary = (telemetry?: TelemetryResponse, error?: Error) => {
@@ -149,9 +149,15 @@ const formatResources = (resources?: PterodactylResources) => {
   const cpuText = `${cpuIcon} CPU ${formatPercent(cpuPercent)}`;
   const memText = `${memIcon} RAM ${formatUsage(resources?.memoryBytes, resources?.memoryLimitBytes)}`;
   const diskText = `${diskIcon} Disk ${formatUsage(resources?.diskBytes, resources?.diskLimitBytes)}`;
-  const uptimeText = `⏱ Uptime ${formatUptime(resources?.uptimeMs)}`;
+  const uptimeText = resources?.uptimeMs !== undefined ? `⏱ Uptime ${formatUptime(resources?.uptimeMs)}` : null;
+  const lines = [`${cpuText} | ${memText}`];
+  if (uptimeText) {
+    lines.push(`${diskText} | ${uptimeText}`);
+  } else {
+    lines.push(diskText);
+  }
 
-  return [`${cpuText} | ${memText}`, `${diskText} | ${uptimeText}`];
+  return lines;
 };
 
 const formatStatusLines = (
@@ -160,8 +166,8 @@ const formatStatusLines = (
   telemetryError?: Error
 ) => {
   const lines = [
-    `Status: ${formatStatus(resources?.currentState)}`,
-    `TPS/MSPT: ${formatTpsMspt(telemetry)}`,
+    formatStatus(resources?.currentState),
+    formatTpsMspt(telemetry),
     formatPlayerSummary(telemetry, telemetryError),
     ...formatResources(resources),
   ];

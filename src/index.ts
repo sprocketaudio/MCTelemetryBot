@@ -5,7 +5,13 @@ import { executeMcStatus, handleMcStatusView, mcStatusCommand } from './commands
 import { MCSTATUS_VIEW_PLAYERS_ID, MCSTATUS_VIEW_STATUS_ID } from './config/constants';
 import { loadServers } from './config/servers';
 import { loadDashboardConfig, DashboardConfig } from './services/dashboardStore';
-import { buildStatusEmbed, buildViewComponents, fetchServerStatuses, getViewFromMessage } from './services/status';
+import {
+  StatusView,
+  buildStatusEmbed,
+  buildViewComponents,
+  fetchServerStatuses,
+  getViewFromMessage,
+} from './services/status';
 import { logger } from './utils/logger';
 
 const token = process.env.DISCORD_TOKEN;
@@ -24,6 +30,7 @@ const resolvedGuildId = guildId!;
 const servers = loadServers();
 let dashboardConfig: DashboardConfig | null = loadDashboardConfig();
 let dashboardInterval: NodeJS.Timeout | null = null;
+let dashboardView: StatusView | null = null;
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
@@ -49,7 +56,8 @@ async function refreshDashboard(options: { forceRefresh?: boolean } = {}) {
     const message = await textChannel.messages.fetch(dashboardConfig.messageId);
 
     const statuses = await fetchServerStatuses(servers, options);
-    const currentView = getViewFromMessage(message);
+    const currentView = dashboardView ?? getViewFromMessage(message);
+    dashboardView = currentView;
     const embed = buildStatusEmbed(servers, statuses, new Date(), currentView);
 
     await message.edit({ embeds: [embed], components: buildViewComponents(currentView) });
@@ -104,12 +112,28 @@ client.on('interactionCreate', async (interaction: Interaction) => {
     }
 
     if (interaction.isButton() && interaction.customId === MCSTATUS_VIEW_STATUS_ID) {
-      await handleMcStatusView(interaction, { servers, adminRoleId }, 'status');
+      await handleMcStatusView(interaction, {
+        servers,
+        adminRoleId,
+        onViewChange: (view, messageId) => {
+          if (dashboardConfig?.messageId === messageId) {
+            dashboardView = view;
+          }
+        },
+      }, 'status');
       return;
     }
 
     if (interaction.isButton() && interaction.customId === MCSTATUS_VIEW_PLAYERS_ID) {
-      await handleMcStatusView(interaction, { servers, adminRoleId }, 'players');
+      await handleMcStatusView(interaction, {
+        servers,
+        adminRoleId,
+        onViewChange: (view, messageId) => {
+          if (dashboardConfig?.messageId === messageId) {
+            dashboardView = view;
+          }
+        },
+      }, 'players');
       return;
     }
   } catch (error) {

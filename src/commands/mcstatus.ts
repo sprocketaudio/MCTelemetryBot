@@ -11,6 +11,7 @@ import { isAdmin } from '../utils/permissions';
 export interface CommandContext {
   servers: ServerConfig[];
   adminRoleId?: string;
+  onViewChange?: (view: StatusView, messageId?: string) => void;
 }
 
 export const mcStatusCommand = new SlashCommandBuilder()
@@ -52,6 +53,10 @@ export async function handleMcStatusView(
   }
 
   await interaction.deferUpdate();
+
+  if (context.onViewChange) {
+    context.onViewChange(view, interaction.message.id);
+  }
 
   const statuses = await fetchServerStatuses(context.servers, { forceRefresh: true });
   const embed = buildStatusEmbed(context.servers, statuses, new Date(), view);
