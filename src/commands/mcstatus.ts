@@ -27,6 +27,7 @@ import { buildPanelConsoleUrl, sendPowerSignal } from '../services/pterodactyl';
 import { hasModRoleOrAdmin, isAdministrator } from '../utils/permissions';
 import { editReplyWithExpiry, sendTemporaryReply } from '../utils/messages';
 import { AuditLogEntry, AuditStyle } from '../services/auditLogger';
+import { logger } from '../utils/logger';
 
 export interface CommandContext {
   servers: ServerConfig[];
@@ -140,6 +141,11 @@ export async function handleMcStatusView(
     embeds,
     components: buildViewComponents(context.servers, currentState.selectedServerId, currentState.serverViews),
   });
+
+  scheduleSelectionReset(interaction.message, context, {
+    pteroToken,
+    tokenOwnerId: interaction.user.id,
+  });
 }
 
 export async function handleMcStatusSelect(
@@ -184,6 +190,8 @@ export async function handleMcStatusSelect(
     embeds,
     components: buildViewComponents(context.servers, currentState.selectedServerId, currentState.serverViews),
   });
+
+  scheduleSelectionReset(interaction.message, context, { pteroToken, tokenOwnerId: interaction.user.id });
 }
 
 export type StatusAction = 'console' | 'restart' | 'stop' | 'start' | 'kill';
@@ -215,6 +223,66 @@ interface ActionConfirmation {
   serverId: string;
 }
 
+const buildConfirmationPhrase = (
+  action: Extract<StatusAction, 'restart' | 'stop' | 'kill'>,
+  serverId: string
+): string => {
+  const id = serverId.toLowerCase();
+  if (action === 'restart') return `restart ${id}`;
+  if (action === 'stop') return `stop ${id}`;
+  return `kill ${id} yes`;
+};
+
+const normalizeConfirmationValue = (value: string): string =>
+  value
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+
+const selectionResetTimers = new Map<string, NodeJS.Timeout>();
+
+const clearSelectionResetTimer = (messageId: string) => {
+  const existing = selectionResetTimers.get(messageId);
+  if (existing) {
+    clearTimeout(existing);
+    selectionResetTimers.delete(messageId);
+  }
+};
+
+const scheduleSelectionReset = (
+  message: Message,
+  context: CommandContext,
+  options: { pteroToken?: string | null; tokenOwnerId?: string } = {}
+) => {
+  clearSelectionResetTimer(message.id);
+
+  const timer = setTimeout(async () => {
+    const state = context.getState?.(message.id) ?? getDashboardStateFromMessage(message, context.servers);
+    if (!state.selectedServerId) {
+      selectionResetTimers.delete(message.id);
+      return;
+    }
+
+    state.selectedServerId = null;
+    if (context.onStateChange) {
+      context.onStateChange(state, message.id);
+    }
+
+    try {
+      await refreshDashboardMessage(message, state, context, {
+        pteroToken: options.pteroToken ?? undefined,
+        tokenOwnerId: options.tokenOwnerId,
+      });
+    } catch (error) {
+      logger.warn('Failed to reset selection state after timeout', error);
+    }
+
+    selectionResetTimers.delete(message.id);
+  }, 60_000);
+
+  selectionResetTimers.set(message.id, timer);
+};
+
 export const parseActionConfirmation = (customId: string): ActionConfirmation | null => {
   const match = customId.match(
     new RegExp(`^${MCSTATUS_CONFIRM_CUSTOM_ID_PREFIX}:(restart|stop|kill):([^:]+):([^:]+)$`)
@@ -231,20 +299,19 @@ const buildConfirmationModal = (
   serverId: string,
   serverName: string
 ) => {
-  const title = action === 'restart' ? 'Restart server' : action === 'stop' ? 'Stop server' : 'Kill server';
-  const prompt = action === 'restart' ? 'Restart' : action === 'stop' ? 'Stop' : 'Kill';
+  const phrase = buildConfirmationPhrase(action, serverId);
 
   return new ModalBuilder()
     .setCustomId(`${MCSTATUS_CONFIRM_CUSTOM_ID_PREFIX}:${action}:${messageId}:${serverId}`)
-    .setTitle(title)
+    .setTitle(`Confirm ${action.toUpperCase()} - ${serverName}`)
     .addComponents(
       new ActionRowBuilder<TextInputBuilder>().addComponents(
         new TextInputBuilder()
           .setCustomId('confirm_action')
-          .setLabel(`Type ${prompt} to confirm ${serverName}`)
+          .setLabel('Type the EXACT phrase below')
           .setStyle(TextInputStyle.Short)
           .setRequired(true)
-          .setPlaceholder(prompt)
+          .setPlaceholder(phrase)
       )
     );
 };
@@ -283,6 +350,8 @@ export async function handleMcStatusAction(
     await sendTemporaryReply(interaction, 'You need Moderator permissions to perform this action.');
     return;
   }
+
+  scheduleSelectionReset(interaction.message, context, { tokenOwnerId: interaction.user.id });
 
   const currentState = resolveState(interaction, context);
   if (!currentState.selectedServerId) {
@@ -352,19 +421,32 @@ export async function handleMcStatusActionConfirm(
     return;
   }
 
-  const confirmation = interaction.fields.getTextInputValue('confirm_action')?.trim();
-  if (!confirmation || confirmation.toLowerCase() !== parsed.action.toLowerCase()) {
-    await sendTemporaryReply(interaction, `Confirmation failed. Type "${parsed.action}" to proceed.`);
-    return;
-  }
-
   const targetServer = context.servers.find((server) => server.id === parsed.serverId);
   if (!targetServer) {
+    if (!interaction.deferred && !interaction.replied) {
+      await interaction.deferUpdate();
+    }
     await sendTemporaryReply(interaction, 'Selected server is no longer available.');
     return;
   }
 
-  await interaction.deferReply();
+  const expectedPhrase = buildConfirmationPhrase(parsed.action, parsed.serverId);
+  const confirmation = interaction.fields.getTextInputValue('confirm_action') ?? '';
+
+  if (normalizeConfirmationValue(confirmation) !== normalizeConfirmationValue(expectedPhrase)) {
+    if (!interaction.deferred && !interaction.replied) {
+      await interaction.deferUpdate();
+    }
+    await sendTemporaryReply(
+      interaction,
+      `Confirmation failed. Type the exact phrase: "${expectedPhrase}"`
+    );
+    return;
+  }
+
+  if (!interaction.deferred && !interaction.replied) {
+    await interaction.deferUpdate();
+  }
   const pteroToken = await resolvePteroTokenOrNotify(interaction, context);
   if (!pteroToken) {
     return;
@@ -374,10 +456,13 @@ export async function handleMcStatusActionConfirm(
       token: pteroToken,
       tokenOwnerId: interaction.user.id,
     });
-    await editReplyWithExpiry(interaction, `Sent ${parsed.action} command to **${targetServer.name}**.`);
+    await sendTemporaryReply(
+      interaction,
+      `${parsed.action.charAt(0).toUpperCase()}${parsed.action.slice(1)} sent for ${targetServer.name}.`
+    );
     context.logAudit?.(buildActionAuditEntry(parsed.action, targetServer.name), interaction.user);
   } catch (error) {
-    await editReplyWithExpiry(
+    await sendTemporaryReply(
       interaction,
       `Failed to ${parsed.action} **${targetServer.name}**: ${(error as Error).message}`
     );
